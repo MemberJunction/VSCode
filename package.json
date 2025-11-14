@@ -1,0 +1,89 @@
+{
+  "name": "memberjunction-vscode",
+  "displayName": "MemberJunction for Visual Studio Code",
+  "description": "Development toolkit for MemberJunction: metadata management, entity IntelliSense, and code navigation",
+  "version": "0.1.0",
+  "publisher": "memberjunction",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "memberjunction",
+    "mj",
+    "metadata",
+    "entities",
+    "low-code"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "MemberJunction",
+      "properties": {
+        "memberjunction.features.metadataSync.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Metadata Sync features"
+        },
+        "memberjunction.metadataSync.autoValidate": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically validate metadata JSON files on save"
+        },
+        "memberjunction.metadataSync.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show metadata sync status in status bar"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "memberjunction.validateMetadata",
+        "title": "MemberJunction: Validate Metadata File"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./dist/test/runTest.js",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "dependencies": {
+    "@memberjunction/core": "^2.46.0",
+    "@memberjunction/core-entities": "^2.46.0",
+    "@memberjunction/global": "^2.46.0",
+    "glob": "^10.3.10"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.2",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MemberJunction/MJVSCode.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MemberJunction/MJVSCode/issues"
+  },
+  "homepage": "https://docs.memberjunction.org"
+}
