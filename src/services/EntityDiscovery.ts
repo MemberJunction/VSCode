@@ -3,17 +3,21 @@ import * as path from 'path';
 import { Metadata, EntityInfo as MJEntityInfo, EntityFieldInfo as MJEntityFieldInfo } from '@memberjunction/core';
 import { EntityInfo, EntityFieldInfo } from '../types';
 import { OutputChannel } from '../common/OutputChannel';
+import { ConnectionService } from './ConnectionService';
 
 /**
  * Service for discovering and managing entity information
- * from @memberjunction/core-entities and user's GeneratedEntities
+ * Loads real entity metadata from the connected MemberJunction database
  */
 export class EntityDiscovery {
     private static instance: EntityDiscovery;
     private entities: Map<string, EntityInfo> = new Map();
     private initialized: boolean = false;
+    private connectionService: ConnectionService;
 
-    private constructor() {}
+    private constructor() {
+        this.connectionService = ConnectionService.getInstance();
+    }
 
     public static getInstance(): EntityDiscovery {
         if (!this.instance) {
@@ -23,23 +27,36 @@ export class EntityDiscovery {
     }
 
     /**
-     * Initialize and load all entities
+     * Initialize and load all entities from the connected database
+     * Requires ConnectionService to be connected first
      */
     public async initialize(): Promise<void> {
         if (this.initialized) {
             return;
         }
 
-        try {
-            OutputChannel.info('Initializing entity discovery...');
+        // Ensure we're connected to the database
+        if (!this.connectionService.isConnected) {
+            OutputChannel.info('Not connected to database, attempting to connect...');
+            const connected = await this.connectionService.connect();
+            if (!connected) {
+                const error = this.connectionService.error;
+                throw new Error(
+                    `Cannot initialize entity discovery: ${error?.message || 'Connection failed'}`
+                );
+            }
+        }
 
-            // Initialize MemberJunction metadata
+        try {
+            OutputChannel.info('Initializing entity discovery from database...');
+
+            // Now that provider is initialized, Metadata will have real data
             const md = new Metadata();
 
             // Load all entities from metadata
             const mjEntities = md.Entities;
 
-            OutputChannel.info(`Found ${mjEntities.length} entities in metadata`);
+            OutputChannel.info(`Found ${mjEntities.length} entities in database`);
 
             // Convert MJ entities to our format
             for (const mjEntity of mjEntities) {
@@ -69,7 +86,11 @@ export class EntityDiscovery {
             isPrimaryKey: mjField.IsPrimaryKey,
             isUnique: mjField.IsUnique,
             relatedEntity: mjField.RelatedEntity || undefined,
-            description: mjField.Description || undefined
+            description: mjField.Description || undefined,
+            defaultValue: mjField.DefaultValue || undefined,
+            autoIncrement: mjField.AutoIncrement || false,
+            isVirtual: mjField.IsVirtual || false,
+            readOnly: mjField.ReadOnly || false
         }));
 
         return {
@@ -80,44 +101,27 @@ export class EntityDiscovery {
             schemaName: mjEntity.SchemaName,
             description: mjEntity.Description || undefined,
             fields,
-            isCore: this.isCoreEntity(mjEntity.Name),
+            isCore: this.isCoreEntity(mjEntity),
             filePath: this.findEntityFilePath(mjEntity.Name)
         };
     }
 
     /**
-     * Check if an entity is a core entity
+     * Check if an entity is a core MemberJunction entity
+     * Core entities are those in the __mj schema (or dbo for legacy)
      */
-    private isCoreEntity(entityName: string): boolean {
-        // Core entities are those that come with @memberjunction/core-entities
-        // We can check this by looking at common core entity names
-        const coreEntities = [
-            'Applications',
-            'Entities',
-            'Entity Fields',
-            'User Views',
-            'User',
-            'Company',
-            'Employee',
-            'User Roles',
-            'Roles',
-            'Row Level Security Filters',
-            'Audit Log',
-            'Authorization',
-            'Conversation',
-            'Conversation Detail',
-            'User Application Entities',
-            'Application Entities',
-            'Entity Permissions',
-            'User View Runs',
-            'User View Run Details'
-        ];
-
-        return coreEntities.includes(entityName);
+    private isCoreEntity(mjEntity: MJEntityInfo): boolean {
+        const schemaName = mjEntity.SchemaName?.toLowerCase() || '';
+        // Core entities are in __mj schema, or sometimes dbo for older MJ installations
+        // Also check if the name starts with "MJ:" prefix which indicates core entities
+        return schemaName === '__mj' ||
+               schemaName === 'dbo' ||
+               mjEntity.Name.startsWith('MJ:');
     }
 
     /**
      * Find the file path for an entity's TypeScript class
+     * Returns undefined if no file is found
      */
     private findEntityFilePath(entityName: string): string | undefined {
         // Try to find the entity file in the workspace
@@ -127,17 +131,29 @@ export class EntityDiscovery {
         }
 
         const workspaceRoot = workspaceFolders[0].uri.fsPath;
-
-        // Convert entity name to class name (e.g., "Entity Fields" -> "EntityFieldEntity")
         const className = this.entityNameToClassName(entityName);
+        const fs = require('fs');
 
-        // Check in GeneratedEntities (custom entities)
-        const customPath = path.join(workspaceRoot, 'packages', 'GeneratedEntities', 'src', `${className}.ts`);
+        // List of potential paths to check (in order of preference)
+        const potentialPaths = [
+            // Individual entity file in GeneratedEntities
+            path.join(workspaceRoot, 'packages', 'GeneratedEntities', 'src', `${className}.ts`),
+            // Combined entity_subclasses.ts in GeneratedEntities
+            path.join(workspaceRoot, 'packages', 'GeneratedEntities', 'src', 'generated', 'entity_subclasses.ts'),
+            // Core entities in local packages (monorepo)
+            path.join(workspaceRoot, 'packages', 'MJCoreEntities', 'src', 'generated', 'entity_subclasses.ts'),
+            // Core entities in node_modules
+            path.join(workspaceRoot, 'node_modules', '@memberjunction', 'core-entities', 'src', 'generated', 'entity_subclasses.ts'),
+        ];
 
-        // For core entities, they would be in @memberjunction/core-entities
-        // But we don't need to provide a path for those since they're in node_modules
+        // Return the first path that exists
+        for (const filePath of potentialPaths) {
+            if (fs.existsSync(filePath)) {
+                return filePath;
+            }
+        }
 
-        return customPath;
+        return undefined;
     }
 
     /**

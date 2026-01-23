@@ -63,6 +63,14 @@ export interface EntityFieldInfo {
     isUnique: boolean;
     relatedEntity?: string;
     description?: string;
+    /** Default value for the field (if any) */
+    defaultValue?: string;
+    /** Whether the field auto-increments (identity column) */
+    autoIncrement: boolean;
+    /** Whether the field is computed/virtual */
+    isVirtual: boolean;
+    /** Whether the field is read-only */
+    readOnly: boolean;
 }
 
 /**

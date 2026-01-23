@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Feature } from './types';
 import { MetadataSyncFeature } from './features/metadata-sync/MetadataSyncFeature';
+import { EntityExplorerFeature } from './features/entity-explorer/EntityExplorerFeature';
 import { OutputChannel } from './common/OutputChannel';
 import { StatusBarManager } from './common/StatusBarManager';
 
@@ -8,7 +9,8 @@ import { StatusBarManager } from './common/StatusBarManager';
  * List of all features to be registered
  */
 const features: Feature[] = [
-    new MetadataSyncFeature()
+    new MetadataSyncFeature(),
+    new EntityExplorerFeature()
 ];
 
 /**

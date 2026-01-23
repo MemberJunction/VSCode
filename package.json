@@ -25,6 +25,30 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "memberjunction",
+          "title": "MemberJunction",
+          "icon": "resources/mj-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "memberjunction": [
+        {
+          "id": "memberjunction.entityExplorer",
+          "name": "Entity Explorer",
+          "when": "memberjunction.workspaceInitialized"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "memberjunction.entityExplorer",
+        "contents": "No entities loaded.\n[Connect to Database](command:memberjunction.connect)\n[Connection Help](command:memberjunction.showConnectionHelp)"
+      }
+    ],
     "configuration": {
       "title": "MemberJunction",
       "properties": {
@@ -32,6 +56,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable Metadata Sync features"
+        },
+        "memberjunction.features.entityExplorer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Entity Explorer sidebar"
         },
         "memberjunction.metadataSync.autoValidate": {
           "type": "boolean",
@@ -49,8 +78,104 @@
       {
         "command": "memberjunction.validateMetadata",
         "title": "MemberJunction: Validate Metadata File"
+      },
+      {
+        "command": "memberjunction.connect",
+        "title": "MemberJunction: Connect to Database"
+      },
+      {
+        "command": "memberjunction.reconnect",
+        "title": "MemberJunction: Reconnect to Database"
+      },
+      {
+        "command": "memberjunction.showConnectionHelp",
+        "title": "MemberJunction: Connection Help"
+      },
+      {
+        "command": "memberjunction.refreshEntityExplorer",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memberjunction.searchEntities",
+        "title": "Search Entities",
+        "icon": "$(search)"
+      },
+      {
+        "command": "memberjunction.clearEntityFilter",
+        "title": "Clear Filter",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "memberjunction.openEntityFile",
+        "title": "Open Entity File"
+      },
+      {
+        "command": "memberjunction.goToEntity",
+        "title": "Go to Entity"
+      },
+      {
+        "command": "memberjunction.showEntityDetails",
+        "title": "Show Details"
+      },
+      {
+        "command": "memberjunction.copyEntityName",
+        "title": "Copy Entity Name"
+      },
+      {
+        "command": "memberjunction.copyFieldName",
+        "title": "Copy Field Name"
+      },
+      {
+        "command": "memberjunction.disconnect",
+        "title": "MemberJunction: Disconnect from Database"
+      },
+      {
+        "command": "memberjunction.focusEntityExplorer",
+        "title": "MemberJunction: Show Entity Explorer"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "memberjunction.searchEntities",
+          "when": "view == memberjunction.entityExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.refreshEntityExplorer",
+          "when": "view == memberjunction.entityExplorer",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "memberjunction.showEntityDetails",
+          "when": "view == memberjunction.entityExplorer && viewItem == entity",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.openEntityFile",
+          "when": "view == memberjunction.entityExplorer && viewItem == entity",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memberjunction.copyEntityName",
+          "when": "view == memberjunction.entityExplorer && viewItem == entity",
+          "group": "copy@1"
+        },
+        {
+          "command": "memberjunction.copyFieldName",
+          "when": "view == memberjunction.entityExplorer && viewItem == field",
+          "group": "copy@1"
+        },
+        {
+          "command": "memberjunction.goToEntity",
+          "when": "view == memberjunction.entityExplorer && viewItem == field",
+          "group": "navigation@1"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -63,9 +188,11 @@
     "publish": "vsce publish"
   },
   "dependencies": {
-    "@memberjunction/core": "^2.46.0",
-    "@memberjunction/core-entities": "^2.46.0",
-    "@memberjunction/global": "^2.46.0",
+    "@memberjunction/core": "^3.2.0",
+    "@memberjunction/core-entities": "^3.2.0",
+    "@memberjunction/global": "^3.2.0",
+    "@memberjunction/metadata-sync": "^3.2.0",
+    "dotenv": "^16.4.5",
     "glob": "^10.3.10"
   },
   "devDependencies": {

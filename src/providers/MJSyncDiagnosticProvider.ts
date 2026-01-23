@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { EntityDiscovery } from '../services/EntityDiscovery';
 import { MetadataRootDiscovery } from '../services/MetadataRootDiscovery';
 import { OutputChannel } from '../common/OutputChannel';
+import { EntityInfo, EntityFieldInfo } from '../types';
 
 /**
  * Provides real-time validation diagnostics for metadata files
@@ -129,90 +130,77 @@ export class MJSyncDiagnosticProvider {
 
         try {
             const text = document.getText();
-            const records = JSON.parse(text);
+            const parsed = JSON.parse(text);
 
-            if (!Array.isArray(records)) {
-                diagnostics.push(new vscode.Diagnostic(
-                    new vscode.Range(0, 0, 0, 1),
-                    'Entity record files must be an array of records',
-                    vscode.DiagnosticSeverity.Error
-                ));
-            } else {
-                // Validate each record
-                for (let i = 0; i < records.length; i++) {
-                    const record = records[i];
+            // Support both array format and single-object format
+            const records = Array.isArray(parsed) ? parsed : [parsed];
 
-                    // Check if record has fields property
-                    if (!record.fields) {
-                        diagnostics.push(new vscode.Diagnostic(
-                            new vscode.Range(0, 0, 0, 1),
-                            `Record at index ${i} is missing required "fields" property`,
-                            vscode.DiagnosticSeverity.Error
-                        ));
-                        continue;
-                    }
+            // Validate each record
+            for (let i = 0; i < records.length; i++) {
+                const record = records[i];
 
-                    // Validate parent entity field names
-                    await this.validateFieldsInRecord(document, record.fields, entity, entityName, diagnostics);
+                // Check if record has fields property
+                if (!record.fields) {
+                    diagnostics.push(new vscode.Diagnostic(
+                        new vscode.Range(0, 0, 0, 1),
+                        Array.isArray(parsed)
+                            ? `Record at index ${i} is missing required "fields" property`
+                            : 'Record is missing required "fields" property',
+                        vscode.DiagnosticSeverity.Error
+                    ));
+                    continue;
+                }
 
-                    // Validate related entities
-                    if (record.relatedEntities) {
-                        for (const [relatedEntityKey, relatedRecords] of Object.entries(record.relatedEntities)) {
-                            const relatedData = relatedRecords as any;
+                // Validate parent entity field names
+                await this.validateFieldsInRecord(document, record.fields, entity, entityName, diagnostics);
 
-                            // Determine the related entity name
-                            let relatedEntityName = relatedEntityKey;
+                // Validate related entities
+                if (record.relatedEntities) {
+                    for (const [relatedEntityKey, relatedRecords] of Object.entries(record.relatedEntities)) {
+                        const relatedData = relatedRecords as unknown;
 
-                            // If the related records have an entity property, use that
-                            if (Array.isArray(relatedData) && relatedData.length > 0 && relatedData[0].entity) {
-                                relatedEntityName = relatedData[0].entity;
-                            }
+                        // Determine the related entity name
+                        let relatedEntityName = relatedEntityKey;
 
-                            const relatedEntity = this.entityDiscovery.getEntity(relatedEntityName);
-                            if (!relatedEntity) {
-                                // Unknown related entity - add diagnostic
-                                const lineNum = this.findLineWithText(document, `"${relatedEntityKey}"`);
-                                if (lineNum !== -1) {
-                                    const line = document.lineAt(lineNum);
-                                    const keyIndex = line.text.indexOf(`"${relatedEntityKey}"`);
-                                    const range = new vscode.Range(
-                                        lineNum, keyIndex,
-                                        lineNum, keyIndex + relatedEntityKey.length + 2
-                                    );
-                                    diagnostics.push(new vscode.Diagnostic(
-                                        range,
-                                        `Unknown related entity: "${relatedEntityName}". Entity not found in metadata.`,
-                                        vscode.DiagnosticSeverity.Warning
-                                    ));
-                                }
-                                continue;
-                            }
-
-                            // Validate fields in each related record
-                            if (Array.isArray(relatedData)) {
-                                for (const relatedRecord of relatedData) {
-                                    if (relatedRecord.fields) {
-                                        await this.validateFieldsInRecord(
-                                            document,
-                                            relatedRecord.fields,
-                                            relatedEntity,
-                                            relatedEntityName,
-                                            diagnostics
-                                        );
-                                    }
-                                }
-                            }
+                        // If the related records have an entity property, use that
+                        if (Array.isArray(relatedData) && relatedData.length > 0 && (relatedData[0] as Record<string, unknown>).entity) {
+                            relatedEntityName = (relatedData[0] as Record<string, unknown>).entity as string;
                         }
-                    }
 
-                    // Check for required fields (non-nullable, non-PK fields)
-                    for (const field of entity.fields) {
-                        if (!field.allowsNull && !field.isPrimaryKey && !record.fields[field.name]) {
-                            diagnostics.push(new vscode.Diagnostic(
-                                new vscode.Range(0, 0, 0, 1),
-                                `Record at index ${i} is missing required field "${field.name}"`,
-                                vscode.DiagnosticSeverity.Warning
-                            ));
+                        const relatedEntity = this.entityDiscovery.getEntity(relatedEntityName);
+                        if (!relatedEntity) {
+                            // Unknown related entity - add diagnostic
+                            const lineNum = this.findLineWithText(document, `"${relatedEntityKey}"`);
+                            if (lineNum !== -1) {
+                                const line = document.lineAt(lineNum);
+                                const keyIndex = line.text.indexOf(`"${relatedEntityKey}"`);
+                                const range = new vscode.Range(
+                                    lineNum, keyIndex,
+                                    lineNum, keyIndex + relatedEntityKey.length + 2
+                                );
+                                diagnostics.push(new vscode.Diagnostic(
+                                    range,
+                                    `Unknown related entity: "${relatedEntityName}". Entity not found in metadata.`,
+                                    vscode.DiagnosticSeverity.Warning
+                                ));
+                            }
+                            continue;
+                        }
+
+                        // Validate fields in each related record
+                        if (Array.isArray(relatedData)) {
+                            for (const relatedRecord of relatedData) {
+                                const rec = relatedRecord as Record<string, unknown>;
+                                if (rec.fields) {
+                                    await this.validateFieldsInRecord(
+                                        document,
+                                        rec.fields as Record<string, unknown>,
+                                        relatedEntity,
+                                        relatedEntityName,
+                                        diagnostics
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -235,12 +223,15 @@ export class MJSyncDiagnosticProvider {
      */
     private async validateFieldsInRecord(
         document: vscode.TextDocument,
-        fields: Record<string, any>,
-        entity: any,
+        fields: Record<string, unknown>,
+        entity: EntityInfo,
         entityName: string,
         diagnostics: vscode.Diagnostic[]
     ): Promise<void> {
-        for (const fieldName of Object.keys(fields)) {
+        const providedFieldNames = new Set(Object.keys(fields));
+
+        // Check for unknown fields
+        for (const fieldName of providedFieldNames) {
             const fieldValue = fields[fieldName];
 
             // Skip metadata keywords
@@ -249,7 +240,7 @@ export class MJSyncDiagnosticProvider {
             }
 
             // Check if field exists in entity
-            const field = entity.fields.find((f: any) => f.name === fieldName);
+            const field = entity.fields.find((f: EntityFieldInfo) => f.name === fieldName);
             if (!field) {
                 // Find the line where this field name appears
                 const lineNum = this.findFieldNameLine(document, fieldName);
@@ -279,6 +270,83 @@ export class MJSyncDiagnosticProvider {
                 }
             }
         }
+
+        // Check for missing required fields
+        const requiredFields = this.getRequiredFields(entity);
+        const missingRequiredFields = requiredFields.filter(f => !providedFieldNames.has(f.name));
+
+        if (missingRequiredFields.length > 0) {
+            // Find the "fields" line to place the diagnostic near
+            const fieldsLine = this.findPropertyLine(document, 'fields');
+            const range = fieldsLine !== -1
+                ? new vscode.Range(fieldsLine, 0, fieldsLine, 999)
+                : new vscode.Range(0, 0, 0, 1);
+
+            const fieldNames = missingRequiredFields.map(f => f.name).join(', ');
+            diagnostics.push(new vscode.Diagnostic(
+                range,
+                `Missing required field${missingRequiredFields.length > 1 ? 's' : ''} in ${entityName}: ${fieldNames}`,
+                vscode.DiagnosticSeverity.Warning
+            ));
+        }
+    }
+
+    /**
+     * Get fields that are required (must be provided in the record)
+     * A field is required if:
+     * - It doesn't allow null
+     * - It doesn't have a default value
+     * - It's not auto-increment
+     * - It's not virtual/computed
+     * - It's not read-only
+     * - It's not a primary key (usually auto-generated)
+     */
+    private getRequiredFields(entity: EntityInfo): EntityFieldInfo[] {
+        return entity.fields.filter(field => {
+            // Skip if field allows null
+            if (field.allowsNull) {
+                return false;
+            }
+
+            // Skip if field has a default value
+            if (field.defaultValue !== undefined && field.defaultValue !== null) {
+                return false;
+            }
+
+            // Skip auto-increment fields (identity columns)
+            if (field.autoIncrement) {
+                return false;
+            }
+
+            // Skip virtual/computed fields
+            if (field.isVirtual) {
+                return false;
+            }
+
+            // Skip read-only fields
+            if (field.readOnly) {
+                return false;
+            }
+
+            // Skip primary key fields (usually auto-generated or provided via @lookup)
+            if (field.isPrimaryKey) {
+                return false;
+            }
+
+            // Skip common system fields that are typically auto-managed
+            const systemFields = [
+                '__mj_CreatedAt',
+                '__mj_UpdatedAt',
+                'CreatedAt',
+                'UpdatedAt',
+                '__mj_DeletedAt'
+            ];
+            if (systemFields.includes(field.name)) {
+                return false;
+            }
+
+            return true;
+        });
     }
 
     /**
