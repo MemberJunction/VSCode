@@ -40,6 +40,12 @@
           "id": "memberjunction.entityExplorer",
           "name": "Entity Explorer",
           "when": "memberjunction.workspaceInitialized"
+        },
+        {
+          "id": "memberjunction.aiChatPanel",
+          "name": "AI Assistant",
+          "type": "webview",
+          "when": "memberjunction.workspaceInitialized"
         }
       ]
     },
@@ -98,6 +104,22 @@
           "type": "boolean",
           "default": false,
           "description": "Use --skipdb flag when auto-running CodeGen"
+        },
+        "memberjunction.features.aiAssistance.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI Assistance features"
+        },
+        "memberjunction.aiAssistance.autoSuggest": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show context-aware AI suggestions automatically"
+        },
+        "memberjunction.aiAssistance.preferredModel": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "gpt-4", "claude", "gemini"],
+          "description": "Preferred AI model for assistance (requires API keys configured in MJ)"
         }
       }
     },
@@ -186,6 +208,27 @@
       {
         "command": "memberjunction.cancelAutoRun",
         "title": "MemberJunction: Cancel CodeGen Auto-Run"
+      },
+      {
+        "command": "memberjunction.openAIChat",
+        "title": "MemberJunction: Open AI Assistant",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "memberjunction.askAIAboutEntity",
+        "title": "Ask AI About This Entity"
+      },
+      {
+        "command": "memberjunction.askAIToExplain",
+        "title": "Ask AI to Explain This Code"
+      },
+      {
+        "command": "memberjunction.askAIToGenerate",
+        "title": "Ask AI to Generate Code"
+      },
+      {
+        "command": "memberjunction.clearAIChat",
+        "title": "MemberJunction: Clear AI Chat History"
       }
     ],
     "menus": {
@@ -211,6 +254,11 @@
           "command": "memberjunction.openEntityFile",
           "when": "view == memberjunction.entityExplorer && viewItem == entity",
           "group": "navigation@2"
+        },
+        {
+          "command": "memberjunction.askAIAboutEntity",
+          "when": "view == memberjunction.entityExplorer && viewItem == entity",
+          "group": "ai@1"
         },
         {
           "command": "memberjunction.copyEntityName",
@@ -241,6 +289,9 @@
     "publish": "vsce publish"
   },
   "dependencies": {
+    "@memberjunction/ai": "^3.2.0",
+    "@memberjunction/ai-core-plus": "^3.2.0",
+    "@memberjunction/ai-prompts": "^3.2.0",
     "@memberjunction/core": "^3.2.0",
     "@memberjunction/core-entities": "^3.2.0",
     "@memberjunction/global": "^3.2.0",

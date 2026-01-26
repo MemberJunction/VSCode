@@ -3,6 +3,7 @@ import { Feature } from './types';
 import { MetadataSyncFeature } from './features/metadata-sync/MetadataSyncFeature';
 import { EntityExplorerFeature } from './features/entity-explorer/EntityExplorerFeature';
 import { CodeGenFeature } from './features/codegen/CodeGenFeature';
+import { AIAssistanceFeature } from './features/ai-assistance/AIAssistanceFeature';
 import { OutputChannel } from './common/OutputChannel';
 import { StatusBarManager } from './common/StatusBarManager';
 
@@ -12,7 +13,8 @@ import { StatusBarManager } from './common/StatusBarManager';
 const features: Feature[] = [
     new MetadataSyncFeature(),
     new EntityExplorerFeature(),
-    new CodeGenFeature()
+    new CodeGenFeature(),
+    new AIAssistanceFeature()
 ];
 
 /**

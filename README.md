@@ -4,9 +4,11 @@ Official VSCode extension for [MemberJunction](https://memberjunction.org) - the
 
 ## Features
 
-### 🎯 Phase 1: Metadata Sync & IntelliSense
+### ✨ Current Release
 
-This initial release focuses on enhancing the developer experience when working with MemberJunction entities and metadata:
+This extension provides comprehensive development tools for MemberJunction:
+
+### 🎯 Phase 1: Metadata Sync & IntelliSense
 
 #### Entity Explorer
 - **Browse all entities** in your MemberJunction workspace
@@ -31,6 +33,60 @@ This initial release focuses on enhancing the developer experience when working 
 - Quick access to refresh entities
 - Visual indicator of extension status
 
+### 🤖 Phase 2: CodeGen Detection & Automation
+
+Automatic code generation workflow enhancements:
+
+#### CodeGen Detection
+- **Automatic detection** when CodeGen is needed
+- **File watchers** monitor SQL migration changes
+- **Smart notifications** alert you to pending changes
+- **Background tracking** of schema modifications
+
+#### One-Click Execution
+- **Run CodeGen** directly from VSCode
+- **Skip database** option for faster iterations
+- **Auto-run mode** with configurable delays
+- **Progress tracking** with detailed output
+
+#### Change Preview
+- **Diff preview** of generated file changes
+- **File snapshots** before and after CodeGen
+- **Generated files** list and navigation
+- **Status tracking** for all CodeGen operations
+
+### 🤖 Phase 3: AI Assistance
+
+AI-powered development assistance using MemberJunction's multi-LLM system:
+
+#### AI Chat Panel
+- **Interactive chat interface** for MemberJunction questions
+- **Entity-aware conversations** with automatic context
+- **Code explanations** and best practices guidance
+- **Persistent conversation history** within sessions
+- **Beautiful UI** with syntax highlighting and markdown support
+- **Multi-LLM Support**: Uses your configured AI provider (OpenAI, Claude, Anthropic, Gemini, Groq, Ollama, etc.)
+- **Intelligent Fallback**: Works in placeholder mode when database isn't connected
+
+#### Code Actions
+- **"Ask AI to Explain This Code"** - Get detailed explanations of selected code
+- **"Ask AI to Improve This Code"** - Receive suggestions for code quality improvements
+- **"Ask AI to Fix This"** - Get help identifying and fixing bugs
+- **"Ask AI Custom Question"** - Ask anything about selected code
+- **Context menu integration** - Right-click on any code selection
+
+#### Entity Explorer Integration
+- **"Ask AI About Entity"** context menu on entities
+- **Automatic entity context** - AI knows which entity you're working with
+- **Field information** included in AI responses
+- **Relationship awareness** - AI understands entity connections
+
+#### Context-Aware Suggestions
+- **Automatic context detection** from current file and selection
+- **Entity metadata** automatically included in prompts
+- **Conversation continuity** maintains context across messages
+- **Smart suggestions** based on MemberJunction best practices
+
 ## Requirements
 
 - VSCode 1.85.0 or higher
@@ -39,6 +95,16 @@ This initial release focuses on enhancing the developer experience when working 
   - `@memberjunction/core` installed
   - `@memberjunction/core-entities` installed
   - Optional: `packages/GeneratedEntities` for custom entities
+
+### AI Assistance Requirements (Optional)
+
+For full AI capabilities, you'll need:
+- **Database Connection**: Connected MemberJunction database
+- **AI Configuration**: Configured AI model credentials in `mj.config.cjs`
+- **AI Prompts**: At least one AI Prompt defined in your database
+- **Supported LLM Providers**: OpenAI, Anthropic (Claude), Google (Gemini), Groq, Mistral, Azure OpenAI, AWS Bedrock, Ollama (local), and more
+
+**Note**: The AI Assistant works in fallback mode without these requirements, providing helpful MemberJunction information and examples.
 
 ## Installation
 
@@ -74,10 +140,27 @@ Search for "MemberJunction" in the VSCode Extensions marketplace.
 
 Access these commands from the Command Palette (Cmd+Shift+P / Ctrl+Shift+P):
 
+#### Metadata & Entities
 - `MemberJunction: Refresh Entity Explorer` - Reload entities from the file system
 - `MemberJunction: Validate Metadata File` - Manually validate the current metadata file
 - `MemberJunction: Show Entity Information` - Display detailed entity information
 - `MemberJunction: Open Entity Definition` - Open an entity's TypeScript file
+
+#### CodeGen
+- `MemberJunction: Run CodeGen` - Execute code generation
+- `MemberJunction: Run CodeGen (Skip Database)` - Faster CodeGen without DB checks
+- `MemberJunction: Preview CodeGen Changes` - See what will be generated
+- `MemberJunction: Show CodeGen Status` - View current CodeGen state
+
+#### AI Assistance
+- `MemberJunction: Open AI Assistant` - Open the AI chat panel
+- `MemberJunction: Ask AI to Generate Code` - Describe code you want to create
+- `MemberJunction: Clear AI Chat History` - Reset conversation
+- **Code Actions (right-click on selected code):**
+  - Ask AI to Explain This Code
+  - Ask AI to Improve This Code
+  - Ask AI to Fix This
+  - Ask AI Custom Question
 
 ## Configuration
 
@@ -85,15 +168,96 @@ Configure the extension in VSCode Settings (Cmd+, / Ctrl+,):
 
 ```json
 {
-  // Enable/disable features
+  // Feature toggles
   "memberjunction.features.metadataSync.enabled": true,
-  "memberjunction.entityExplorer.enabled": true,
+  "memberjunction.features.entityExplorer.enabled": true,
+  "memberjunction.features.codegen.enabled": true,
+  "memberjunction.features.aiAssistance.enabled": true,
 
   // Metadata sync settings
   "memberjunction.metadataSync.autoValidate": true,
-  "memberjunction.metadataSync.showStatusBar": true
+  "memberjunction.metadataSync.showStatusBar": true,
+
+  // CodeGen settings
+  "memberjunction.codegen.autoDetect": true,
+  "memberjunction.codegen.autoRun": false,
+  "memberjunction.codegen.autoRunDelay": 5000,
+  "memberjunction.codegen.autoRunSkipDb": false,
+
+  // AI Assistance settings
+  "memberjunction.aiAssistance.autoSuggest": true,
+  "memberjunction.aiAssistance.preferredModel": "auto"
 }
 ```
+
+## Setting Up AI Assistance
+
+### 1. Configure AI Models in MemberJunction
+
+Add AI configuration to your `mj.config.cjs`:
+
+```javascript
+module.exports = {
+  // ... other configuration
+  ai: {
+    credentials: [
+      {
+        name: 'OpenAI',
+        type: 'OpenAI',
+        apiKey: process.env.OPENAI_API_KEY
+      },
+      // Or use other providers:
+      // { name: 'Claude', type: 'Anthropic', apiKey: process.env.ANTHROPIC_API_KEY },
+      // { name: 'Gemini', type: 'Google', apiKey: process.env.GOOGLE_API_KEY },
+      // { name: 'Groq', type: 'Groq', apiKey: process.env.GROQ_API_KEY }
+    ]
+  }
+};
+```
+
+### 2. Create AI Prompt in Database
+
+The extension looks for an AI Prompt with "Code Assistant" or "VSCode" in the name. You can create one in your MemberJunction database:
+
+```sql
+-- Example: Create a simple AI Prompt
+INSERT INTO [MJ: AI Prompts] (Name, Description, IsActive, Prompt)
+VALUES (
+  'MemberJunction Code Assistant',
+  'AI assistant for MemberJunction development in VSCode',
+  1,
+  'You are an expert MemberJunction developer assistant...'
+);
+```
+
+Or use the MemberJunction UI to create the prompt through the AI Prompts entity.
+
+### 3. Connect to Database
+
+Use the command palette:
+- `MemberJunction: Connect to Database`
+
+The extension will automatically:
+1. Load your `mj.config.cjs` configuration
+2. Connect to the database
+3. Load available AI Prompts
+4. Enable full AI integration
+
+### 4. Choose Your LLM
+
+The AI Assistant uses whatever LLM provider is configured in your MemberJunction setup. MemberJunction supports:
+
+- **OpenAI**: GPT-4, GPT-4 Turbo, GPT-3.5
+- **Anthropic**: Claude 3.5 Sonnet, Claude 3 Opus/Sonnet/Haiku
+- **Google**: Gemini 1.5 Pro/Flash
+- **Groq**: Fast Llama 3.x inference
+- **Mistral**: Mistral Large/Medium/Small
+- **Azure OpenAI**: Enterprise OpenAI models
+- **AWS Bedrock**: Various models via AWS
+- **Ollama**: Local models (Llama, Mistral, etc.)
+- And more!
+
+The extension respects your `preferredModel` setting when multiple models are available.
 
 ## Workspace Structure
 
@@ -143,22 +307,29 @@ Make sure you have a valid MemberJunction workspace with:
 
 ## Roadmap
 
-### Phase 2: Code Generation (Coming Soon)
-- Detect when CodeGen is needed
+### ✅ Phase 1: Metadata Sync & IntelliSense (Complete)
+- Entity Explorer with core and custom entities
+- IntelliSense for metadata JSON files
+- Real-time validation and diagnostics
+- Status bar integration
+
+### ✅ Phase 2: CodeGen Detection & Automation (Complete)
+- Automatic CodeGen detection
 - One-click CodeGen execution
 - Diff preview of generated files
 - Auto-run on SQL file changes
 
-### Phase 3: AI Assistance (Future)
+### ✅ Phase 3: AI Assistance (Complete)
 - AI chat panel for entity questions
 - Code actions ("Ask AI to...")
 - Context-aware suggestions
-- Agent integration
+- MemberJunction AI agent integration
 
 ### Phase 4: Testing & Database (Future)
 - Test explorer integration
 - Database migration management
 - Test execution and results
+- Query builder and data viewer
 
 ## Contributing
 
