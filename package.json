@@ -71,6 +71,33 @@
           "type": "boolean",
           "default": true,
           "description": "Show metadata sync status in status bar"
+        },
+        "memberjunction.features.codegen.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable CodeGen feature for detecting and running code generation"
+        },
+        "memberjunction.codegen.autoDetect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect when CodeGen is needed based on file changes"
+        },
+        "memberjunction.codegen.autoRun": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run CodeGen when SQL file changes are detected"
+        },
+        "memberjunction.codegen.autoRunDelay": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "Delay in milliseconds before auto-running CodeGen after changes detected"
+        },
+        "memberjunction.codegen.autoRunSkipDb": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use --skipdb flag when auto-running CodeGen"
         }
       }
     },
@@ -133,6 +160,32 @@
       {
         "command": "memberjunction.focusEntityExplorer",
         "title": "MemberJunction: Show Entity Explorer"
+      },
+      {
+        "command": "memberjunction.runCodeGen",
+        "title": "MemberJunction: Run CodeGen",
+        "icon": "$(play)"
+      },
+      {
+        "command": "memberjunction.runCodeGenSkipDb",
+        "title": "MemberJunction: Run CodeGen (Skip Database)"
+      },
+      {
+        "command": "memberjunction.previewCodeGen",
+        "title": "MemberJunction: Preview CodeGen Changes",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "memberjunction.showCodeGenStatus",
+        "title": "MemberJunction: Show CodeGen Status"
+      },
+      {
+        "command": "memberjunction.clearCodeGenChanges",
+        "title": "MemberJunction: Clear Pending CodeGen Changes"
+      },
+      {
+        "command": "memberjunction.cancelAutoRun",
+        "title": "MemberJunction: Cancel CodeGen Auto-Run"
       }
     ],
     "menus": {

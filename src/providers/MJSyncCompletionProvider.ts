@@ -56,10 +56,13 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
      */
     private async provideSyncConfigCompletions(
         _document: vscode.TextDocument,
-        _position: vscode.Position,
+        position: vscode.Position,
         beforeCursor: string
     ): Promise<vscode.CompletionItem[]> {
         const completions: vscode.CompletionItem[] = [];
+
+        // Check if user has already typed an opening quote
+        const { hasOpenQuote, startPos } = this.getEntityNamePrefix(beforeCursor);
 
         // Check if completing entity name
         if (beforeCursor.includes('"entity"') || beforeCursor.includes('entity')) {
@@ -73,7 +76,17 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
                     `Fields: ${entity.fields.length}\n\n` +
                     `${entity.description || ''}`
                 );
-                item.insertText = `"${entity.name}"`;
+                // Don't include quotes if user already typed opening quote
+                if (hasOpenQuote) {
+                    item.insertText = entity.name;
+                    item.range = new vscode.Range(
+                        position.line, startPos + 1, // +1 to start after the opening quote
+                        position.line, position.character
+                    );
+                } else {
+                    item.insertText = `"${entity.name}"`;
+                }
+                item.filterText = hasOpenQuote ? entity.name : `"${entity.name}`;
                 // Sort MJ completions at the top
                 item.sortText = `0_${index.toString().padStart(4, '0')}_${entity.name}`;
                 return item;
@@ -86,12 +99,42 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
             return entities.map(entity => {
                 const item = new vscode.CompletionItem(entity.name, vscode.CompletionItemKind.Reference);
                 item.detail = 'Lookup Entity';
-                item.insertText = `"${entity.name}"`;
+                // Don't include quotes if user already typed opening quote
+                if (hasOpenQuote) {
+                    item.insertText = entity.name;
+                    item.range = new vscode.Range(
+                        position.line, startPos + 1,
+                        position.line, position.character
+                    );
+                } else {
+                    item.insertText = `"${entity.name}"`;
+                }
+                item.filterText = hasOpenQuote ? entity.name : `"${entity.name}`;
                 return item;
             });
         }
 
         return completions;
+    }
+
+    /**
+     * Determine if user has typed an opening quote for an entity name value
+     */
+    private getEntityNamePrefix(beforeCursor: string): { prefix: string; hasOpenQuote: boolean; startPos: number } {
+        const trimmed = beforeCursor.trimEnd();
+
+        // Check for pattern like: `"entity": "AI` (started typing entity name with quote)
+        // Match after a colon followed by optional whitespace and an opening quote
+        const valueMatch = trimmed.match(/:\s*"([^"]*)$/);
+        if (valueMatch) {
+            return {
+                prefix: valueMatch[1],
+                hasOpenQuote: true,
+                startPos: beforeCursor.lastIndexOf('"')
+            };
+        }
+
+        return { prefix: '', hasOpenQuote: false, startPos: beforeCursor.length };
     }
 
     /**
