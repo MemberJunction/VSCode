@@ -31,7 +31,7 @@ export interface MJConfig {
     dbPassword?: string;
     metadataPath?: string;
     generatedEntitiesPath?: string;
-    [key: string]: any;
+    [key: string]: unknown;
 }
 
 /**
@@ -94,4 +94,46 @@ export interface ValidationWarning {
     line?: number;
     column?: number;
     path?: string;
+}
+
+/**
+ * AI Agent information for the extension
+ */
+export interface AgentInfo {
+    id: string;
+    name: string;
+    description?: string;
+    status: 'Active' | 'Disabled' | 'Pending';
+    agentType?: string;
+}
+
+/**
+ * Agent execution options
+ */
+export interface AgentExecutionOptions {
+    verbose?: boolean;
+    timeout?: number;
+    conversationMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
+}
+
+/**
+ * Agent execution result for display
+ */
+export interface AgentExecutionResult {
+    success: boolean;
+    agentName: string;
+    message?: string;
+    error?: string;
+    duration?: number;
+    payload?: unknown;
+}
+
+/**
+ * Agent progress event for UI updates
+ */
+export interface AgentProgressEvent {
+    step: string;
+    message: string;
+    percentage?: number;
+    metadata?: Record<string, unknown>;
 }

@@ -62,8 +62,8 @@ export class MJSyncDiagnosticProvider {
             // Validate lookupFields entity references
             if (config.pull?.lookupFields) {
                 for (const [fieldName, lookupConfig] of Object.entries(config.pull.lookupFields)) {
-                    const lookup = lookupConfig as any;
-                    if (lookup.entity) {
+                    const lookup = lookupConfig as Record<string, unknown>;
+                    if (typeof lookup.entity === 'string') {
                         const entity = this.entityDiscovery.getEntity(lookup.entity);
                         if (!entity) {
                             diagnostics.push(new vscode.Diagnostic(
@@ -79,8 +79,8 @@ export class MJSyncDiagnosticProvider {
             // Validate relatedEntities
             if (config.pull?.relatedEntities) {
                 for (const [key, relatedConfig] of Object.entries(config.pull.relatedEntities)) {
-                    const related = relatedConfig as any;
-                    if (related.entity) {
+                    const related = relatedConfig as Record<string, unknown>;
+                    if (typeof related.entity === 'string') {
                         const entity = this.entityDiscovery.getEntity(related.entity);
                         if (!entity) {
                             diagnostics.push(new vscode.Diagnostic(

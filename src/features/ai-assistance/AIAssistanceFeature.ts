@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Feature } from '../../types';
+import { Feature, MJConfig } from '../../types';
 import { AIService } from '../../services/AIService';
 import { AIChatPanelProvider } from '../../providers/AIChatPanelProvider';
 import { AICodeActionProvider } from '../../providers/AICodeActionProvider';
@@ -171,6 +171,72 @@ export class AIAssistanceFeature implements Feature {
                 }
             })
         );
+
+        // List available AI agents command
+        context.subscriptions.push(
+            vscode.commands.registerCommand('memberjunction.listAIAgents', async () => {
+                try {
+                    const agents = await this.aiService.listAgents(true);
+
+                    if (agents.length === 0) {
+                        vscode.window.showInformationMessage('No AI agents found. Connect to database and ensure agents are configured.');
+                        return;
+                    }
+
+                    // Show quick pick to select an agent
+                    const items = [
+                        { label: '$(comment-discussion) Prompt Mode', description: 'Use direct AI prompts', agentId: null },
+                        { label: '', kind: vscode.QuickPickItemKind.Separator },
+                        ...agents.map(a => ({
+                            label: `$(robot) ${a.name}`,
+                            description: a.description || '',
+                            detail: `Status: ${a.status}`,
+                            agentId: a.id
+                        }))
+                    ];
+
+                    const selected = await vscode.window.showQuickPick(items, {
+                        placeHolder: 'Select AI mode or agent',
+                        title: 'AI Agents'
+                    });
+
+                    if (selected) {
+                        const selectedItem = selected as { agentId: string | null };
+                        if (selectedItem.agentId === null) {
+                            this.aiService.setActiveAgent(null);
+                            vscode.window.showInformationMessage('Switched to Prompt mode');
+                        } else {
+                            const agent = agents.find(a => a.id === selectedItem.agentId);
+                            if (agent) {
+                                this.aiService.setActiveAgent(agent);
+                                vscode.window.showInformationMessage(`Selected agent: ${agent.name}`);
+                            }
+                        }
+
+                        // Refresh the chat panel
+                        if (this.chatPanelProvider) {
+                            await this.chatPanelProvider.refreshAgents();
+                        }
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to list agents: ${(error as Error).message}`);
+                }
+            })
+        );
+
+        // Refresh AI agents command
+        context.subscriptions.push(
+            vscode.commands.registerCommand('memberjunction.refreshAIAgents', async () => {
+                try {
+                    if (this.chatPanelProvider) {
+                        await this.chatPanelProvider.refreshAgents();
+                        vscode.window.showInformationMessage('AI agents refreshed');
+                    }
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to refresh agents: ${(error as Error).message}`);
+                }
+            })
+        );
     }
 
     /**
@@ -223,6 +289,11 @@ export class AIAssistanceFeature implements Feature {
                     });
                 }
 
+                // Refresh available agents
+                if (this.chatPanelProvider) {
+                    await this.chatPanelProvider.refreshAgents();
+                }
+
                 // Update status bar to reflect real AI availability
                 this.updateStatusBarForAIMode();
             } else if (status === 'disconnected' || status === 'error') {
@@ -252,7 +323,7 @@ export class AIAssistanceFeature implements Feature {
     /**
      * React to configuration changes
      */
-    onConfigChange(_config: any): void {
+    onConfigChange(_config: MJConfig): void {
         const enabled = this.enabled();
 
         if (!enabled && this.statusBarItem) {

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { spawn } from 'child_process';
 import { OutputChannel } from '../common/OutputChannel';
 
 /**
@@ -366,8 +367,6 @@ export class CodeGenService {
         cwd: string
     ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
         return new Promise((resolve) => {
-            const { spawn } = require('child_process');
-
             const childProcess = spawn(command, args, {
                 cwd,
                 shell: true,

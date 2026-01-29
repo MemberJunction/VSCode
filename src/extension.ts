@@ -1,11 +1,24 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { Feature } from './types';
 import { MetadataSyncFeature } from './features/metadata-sync/MetadataSyncFeature';
 import { EntityExplorerFeature } from './features/entity-explorer/EntityExplorerFeature';
 import { CodeGenFeature } from './features/codegen/CodeGenFeature';
 import { AIAssistanceFeature } from './features/ai-assistance/AIAssistanceFeature';
+import { TestExplorerFeature } from './features/test-explorer/TestExplorerFeature';
 import { OutputChannel } from './common/OutputChannel';
 import { StatusBarManager } from './common/StatusBarManager';
+
+// NOTE: @memberjunction/core-actions and AI providers are loaded dynamically in initializeAIComponents()
+// This ensures the cache directory is set up before the local embeddings module loads
+
+// Import AI provider loader functions - these register the driver classes
+import { LoadLocalEmbedding } from '@memberjunction/ai-local-embeddings';
+import { LoadOpenAILLM, LoadOpenAIEmbedding } from '@memberjunction/ai-openai';
+import { LoadAnthropicLLM } from '@memberjunction/ai-anthropic';
+import { LoadGroqLLM } from '@memberjunction/ai-groq';
 
 /**
  * List of all features to be registered
@@ -14,8 +27,56 @@ const features: Feature[] = [
     new MetadataSyncFeature(),
     new EntityExplorerFeature(),
     new CodeGenFeature(),
-    new AIAssistanceFeature()
+    new AIAssistanceFeature(),
+    new TestExplorerFeature()
 ];
+
+/**
+ * Initialize AI components including providers and actions
+ * Must be called before agent execution to register all required classes
+ */
+async function initializeAIComponents(): Promise<void> {
+    // Set up cache directory for transformers/embeddings BEFORE loading modules
+    // This prevents ENOENT errors when the local embeddings module tries to create .cache
+    const transformersCacheDir = path.join(os.tmpdir(), 'mj-vscode-cache', 'transformers');
+    try {
+        fs.mkdirSync(transformersCacheDir, { recursive: true });
+        process.env.TRANSFORMERS_CACHE_DIR = transformersCacheDir;
+        console.log(`[MJ Extension] Set TRANSFORMERS_CACHE_DIR to: ${transformersCacheDir}`);
+    } catch (err) {
+        console.error(`[MJ Extension] Failed to create cache directory:`, err);
+    }
+
+    // Load AI providers - these register driver classes needed for embeddings and LLM calls
+    try {
+        console.log(`[MJ Extension] Loading AI providers...`);
+
+        // Load LLM providers
+        LoadOpenAILLM();
+        LoadAnthropicLLM();
+        LoadGroqLLM();
+
+        // Load embedding providers - LocalEmbedding is critical for agent discovery
+        LoadLocalEmbedding();
+        LoadOpenAIEmbedding();
+
+        console.log(`[MJ Extension] AI providers loaded successfully`);
+    } catch (err) {
+        console.error(`[MJ Extension] Failed to load AI providers:`, err);
+    }
+
+    // Now dynamically import core-actions and call LoadAllCoreActions to register action classes
+    // This enables actions like "Web Search", "Find Candidate Agents", "Web Page Content"
+    // CRITICAL: Must call LoadAllCoreActions() - just importing the module isn't enough due to tree-shaking
+    try {
+        console.log(`[MJ Extension] Loading core-actions...`);
+        const coreActions = await import('@memberjunction/core-actions');
+        coreActions.LoadAllCoreActions();
+        console.log(`[MJ Extension] core-actions loaded and registered successfully`);
+    } catch (err) {
+        console.error(`[MJ Extension] Failed to load core-actions:`, err);
+    }
+}
 
 /**
  * Extension activation entry point
@@ -24,6 +85,10 @@ export async function activate(context: vscode.ExtensionContext) {
     OutputChannel.info('MemberJunction extension activating...');
 
     try {
+        // Initialize AI components (providers and actions)
+        // This must happen before any agent execution to register all required classes
+        await initializeAIComponents();
+
         // Check if we're in a MemberJunction workspace
         const isWorkspaceValid = await checkWorkspace();
 

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { EntityDiscovery } from '../services/EntityDiscovery';
 import { MetadataRootDiscovery } from '../services/MetadataRootDiscovery';
 import { OutputChannel } from '../common/OutputChannel';
+import { EntityInfo, EntityFieldInfo } from '../types';
 
 /**
  * Provides hover information for entity fields and metadata keywords
@@ -57,7 +58,7 @@ export class MJSyncHoverProvider implements vscode.HoverProvider {
         }
     }
 
-    private createEntityHover(entity: any): vscode.Hover {
+    private createEntityHover(entity: EntityInfo): vscode.Hover {
         const markdown = new vscode.MarkdownString();
         markdown.appendMarkdown(`### ${entity.name}\n\n`);
         markdown.appendMarkdown(`*${entity.isCore ? 'Core' : 'Custom'} Entity*\n\n`);
@@ -84,7 +85,7 @@ export class MJSyncHoverProvider implements vscode.HoverProvider {
         return new vscode.Hover(markdown);
     }
 
-    private createFieldHover(field: any, entityName: string): vscode.Hover {
+    private createFieldHover(field: EntityFieldInfo, entityName: string): vscode.Hover {
         const markdown = new vscode.MarkdownString();
         markdown.appendMarkdown(`### ${field.displayName || field.name}\n\n`);
         markdown.appendMarkdown(`*Field in ${entityName}*\n\n`);

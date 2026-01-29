@@ -2,9 +2,10 @@ import { AIPromptRunner } from '@memberjunction/ai-prompts';
 import { AIPromptParams, AIPromptEntityExtended } from '@memberjunction/ai-core-plus';
 import { ChatMessage as MJChatMessage } from '@memberjunction/ai';
 import { RunView, UserInfo } from '@memberjunction/core';
-import { EntityInfo } from '../types';
+import { EntityInfo, AgentInfo, AgentProgressEvent } from '../types';
 import { OutputChannel } from '../common/OutputChannel';
 import { ConnectionService } from './ConnectionService';
+import { AgentService } from './AgentService';
 
 /**
  * Message in the AI chat conversation
@@ -14,7 +15,13 @@ export interface ChatMessage {
     content: string;
     timestamp: Date;
     entityContext?: string;
+    agentName?: string; // Track which agent was used (if any)
 }
+
+/**
+ * AI execution mode
+ */
+export type AIExecutionMode = 'prompt' | 'agent';
 
 /**
  * AI Service for integrating MemberJunction AI capabilities
@@ -34,7 +41,15 @@ export class AIService {
     private contextUser: UserInfo | null = null;
     private useRealAI: boolean = false;
 
-    private constructor() {}
+    // Agent integration
+    private agentService: AgentService;
+    private activeAgent: AgentInfo | null = null;
+    private executionMode: AIExecutionMode = 'prompt';
+    private onAgentProgressCallback: ((event: AgentProgressEvent) => void) | null = null;
+
+    private constructor() {
+        this.agentService = AgentService.getInstance();
+    }
 
     /**
      * Get singleton instance
@@ -250,7 +265,7 @@ export class AIService {
             promptParams.contextUser = this.contextUser!;
 
             // Build data object with context
-            const data: Record<string, any> = {
+            const data: Record<string, unknown> = {
                 userMessage,
                 systemPrompt: this.getSystemPrompt(),
                 entityContext: this.currentEntityContext ? {
@@ -308,25 +323,34 @@ export class AIService {
     /**
      * Extract response text from AI result
      */
-    private extractResponseText(result: any): string {
+    private extractResponseText(result: unknown): string {
+        // Type guard helper
+        const isObject = (val: unknown): val is Record<string, unknown> =>
+            typeof val === 'object' && val !== null;
+
+        if (!isObject(result)) {
+            return String(result);
+        }
+
         // Handle different possible response formats from AIPromptRunResult
         if (typeof result.result === 'string') {
             return result.result;
         }
 
-        if (result.result?.text) {
-            return result.result.text;
+        if (isObject(result.result)) {
+            if (typeof result.result.text === 'string') {
+                return result.result.text;
+            }
+            if (typeof result.result.content === 'string') {
+                return result.result.content;
+            }
         }
 
-        if (result.result?.content) {
-            return result.result.content;
-        }
-
-        if (result.rawResult) {
+        if (typeof result.rawResult === 'string') {
             return result.rawResult;
         }
 
-        if (result.chatResult?.content) {
+        if (isObject(result.chatResult) && typeof result.chatResult.content === 'string') {
             return result.chatResult.content;
         }
 
@@ -473,6 +497,165 @@ Always provide code examples when relevant, reference specific MemberJunction pa
         return this.useRealAI;
     }
 
+    // ========== Agent Integration Methods ==========
+
+    /**
+     * Get the current execution mode
+     */
+    getExecutionMode(): AIExecutionMode {
+        return this.executionMode;
+    }
+
+    /**
+     * Set the execution mode
+     */
+    setExecutionMode(mode: AIExecutionMode): void {
+        this.executionMode = mode;
+        OutputChannel.info(`AI execution mode set to: ${mode}`);
+    }
+
+    /**
+     * Get the currently active agent
+     */
+    getActiveAgent(): AgentInfo | null {
+        return this.activeAgent;
+    }
+
+    /**
+     * Set the active agent for execution
+     */
+    setActiveAgent(agent: AgentInfo | null): void {
+        this.activeAgent = agent;
+        if (agent) {
+            this.executionMode = 'agent';
+            OutputChannel.info(`Active agent set to: ${agent.name}`);
+        } else {
+            this.executionMode = 'prompt';
+            OutputChannel.info('Agent cleared, switched to prompt mode');
+        }
+    }
+
+    /**
+     * Check if agent mode is available
+     */
+    isAgentModeAvailable(): boolean {
+        return this.agentService.isReady();
+    }
+
+    /**
+     * List available AI agents
+     */
+    async listAgents(forceRefresh: boolean = false): Promise<AgentInfo[]> {
+        try {
+            return await this.agentService.listAgents(forceRefresh);
+        } catch (error) {
+            OutputChannel.error('Failed to list agents', error as Error);
+            return [];
+        }
+    }
+
+    /**
+     * Set callback for agent progress events
+     */
+    setAgentProgressCallback(callback: ((event: AgentProgressEvent) => void) | null): void {
+        this.onAgentProgressCallback = callback;
+    }
+
+    /**
+     * Send a message using the current execution mode (prompt or agent)
+     */
+    async sendMessageWithMode(userMessage: string, includeHistory: boolean = true): Promise<ChatMessage> {
+        if (this.executionMode === 'agent' && this.activeAgent) {
+            return this.sendMessageToAgent(userMessage, includeHistory);
+        }
+        return this.sendMessage(userMessage, includeHistory);
+    }
+
+    /**
+     * Send a message to the active agent
+     */
+    async sendMessageToAgent(userMessage: string, includeHistory: boolean = true): Promise<ChatMessage> {
+        console.log('[AIService] sendMessageToAgent called');
+        console.log('[AIService] initialized:', this.initialized);
+        console.log('[AIService] activeAgent:', this.activeAgent?.name);
+
+        if (!this.initialized) {
+            console.error('[AIService] Not initialized!');
+            throw new Error('AI Service not initialized. Call initialize() first.');
+        }
+
+        if (!this.activeAgent) {
+            console.error('[AIService] No active agent!');
+            throw new Error('No active agent selected. Use setActiveAgent() first.');
+        }
+
+        try {
+            console.log('[AIService] Building conversation and calling agent...');
+            // Add user message to history
+            const userChatMessage: ChatMessage = {
+                role: 'user',
+                content: userMessage,
+                timestamp: new Date(),
+                entityContext: this.currentEntityContext?.name,
+                agentName: this.activeAgent.name
+            };
+            this.conversationHistory.push(userChatMessage);
+
+            // Build conversation history for agent
+            const conversationMessages = includeHistory
+                ? this.conversationHistory
+                    .filter(m => m.role !== 'system')
+                    .slice(-10)
+                    .map(m => ({
+                        role: m.role as 'user' | 'assistant',
+                        content: m.content
+                    }))
+                : undefined;
+
+            // Execute agent
+            OutputChannel.info(`Sending message to agent: ${this.activeAgent.name}`);
+
+            const result = await this.agentService.executeAgent(
+                this.activeAgent.name,
+                userMessage,
+                { conversationMessages },
+                this.onAgentProgressCallback || undefined
+            );
+
+            // Build response message
+            let responseText: string;
+            if (result.success) {
+                responseText = result.message || 'Agent completed successfully.';
+            } else {
+                responseText = `Agent execution failed: ${result.error || 'Unknown error'}`;
+            }
+
+            // Add assistant response to history
+            const assistantMessage: ChatMessage = {
+                role: 'assistant',
+                content: responseText,
+                timestamp: new Date(),
+                entityContext: this.currentEntityContext?.name,
+                agentName: this.activeAgent.name
+            };
+            this.conversationHistory.push(assistantMessage);
+
+            return assistantMessage;
+
+        } catch (error) {
+            OutputChannel.error('Failed to send message to agent', error as Error);
+
+            const errorMessage: ChatMessage = {
+                role: 'assistant',
+                content: `Agent execution error: ${(error as Error).message}`,
+                timestamp: new Date(),
+                agentName: this.activeAgent?.name
+            };
+            this.conversationHistory.push(errorMessage);
+            return errorMessage;
+        }
+    }
+
     /**
      * Dispose of resources
      */
@@ -483,6 +666,9 @@ Always provide code examples when relevant, reference specific MemberJunction pa
         this.aiPrompt = null;
         this.contextUser = null;
         this.useRealAI = false;
+        this.activeAgent = null;
+        this.executionMode = 'prompt';
+        this.onAgentProgressCallback = null;
         AIService.instance = null;
     }
 }

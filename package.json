@@ -121,6 +121,21 @@
           "default": "auto",
           "enum": ["auto", "gpt-4", "claude", "gemini"],
           "description": "Preferred AI model for assistance (requires API keys configured in MJ)"
+        },
+        "memberjunction.features.testExplorer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Test Explorer integration with MemberJunction Testing Framework"
+        },
+        "memberjunction.testExplorer.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh tests when database connection changes"
+        },
+        "memberjunction.testExplorer.showInlineResults": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show test results inline in the editor"
         }
       }
     },
@@ -230,6 +245,29 @@
       {
         "command": "memberjunction.clearAIChat",
         "title": "MemberJunction: Clear AI Chat History"
+      },
+      {
+        "command": "memberjunction.listAIAgents",
+        "title": "MemberJunction: Select AI Agent",
+        "icon": "$(robot)"
+      },
+      {
+        "command": "memberjunction.refreshAIAgents",
+        "title": "MemberJunction: Refresh AI Agents"
+      },
+      {
+        "command": "memberjunction.refreshTests",
+        "title": "MemberJunction: Refresh Tests",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memberjunction.runAllTests",
+        "title": "MemberJunction: Run All Tests",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "memberjunction.clearTestResults",
+        "title": "MemberJunction: Clear Test Results"
       }
     ],
     "menus": {
@@ -291,9 +329,15 @@
   },
   "dependencies": {
     "@memberjunction/ai": "^3.2.0",
+    "@memberjunction/ai-agents": "^3.2.0",
+    "@memberjunction/ai-anthropic": "^3.2.0",
     "@memberjunction/ai-core-plus": "^3.2.0",
+    "@memberjunction/ai-groq": "^3.2.0",
+    "@memberjunction/ai-local-embeddings": "^3.2.0",
+    "@memberjunction/ai-openai": "^3.2.0",
     "@memberjunction/ai-prompts": "^3.2.0",
     "@memberjunction/core": "^3.2.0",
+    "@memberjunction/core-actions": "^3.2.0",
     "@memberjunction/core-entities": "^3.2.0",
     "@memberjunction/global": "^3.2.0",
     "@memberjunction/metadata-sync": "^3.2.0",
