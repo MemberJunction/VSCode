@@ -293,6 +293,28 @@ export class TestExplorerFeature implements Feature {
                 // It's a test - execute it
                 const result = await this.testService.runTest(testItem.id);
 
+                // Format and append detailed test output
+                const output = this.formatTestOutput(result);
+                run.appendOutput(output);
+
+                // ALSO log to Output channel so user can see it
+                OutputChannel.info('='.repeat(80));
+                OutputChannel.info(`TEST RESULTS: ${testItem.label}`);
+                OutputChannel.info('='.repeat(80));
+                OutputChannel.info(`Status: ${result.success ? '✓ PASSED' : '✗ FAILED'}`);
+                OutputChannel.info(`Duration: ${result.duration}ms`);
+                if (result.message) {
+                    OutputChannel.info(`Message: ${result.message}`);
+                }
+                if (result.actualOutcome) {
+                    OutputChannel.info(`Score: ${result.actualOutcome.score}`);
+                    OutputChannel.info(`Checks: ${result.actualOutcome.passedChecks}/${result.actualOutcome.totalChecks}`);
+                }
+                if (result.error) {
+                    OutputChannel.error(`Error: ${result.error}`);
+                }
+                OutputChannel.info('='.repeat(80));
+
                 if (result.success) {
                     run.passed(testItem, result.duration);
                     this.addSuccessDecoration(testItem);
@@ -357,6 +379,69 @@ export class TestExplorerFeature implements Feature {
         });
 
         vscode.window.showInformationMessage('Test results cleared');
+    }
+
+    /**
+     * Format test output for display
+     */
+    private formatTestOutput(result: {
+        testId: string;
+        testRunId: string;
+        success: boolean;
+        message?: string;
+        startedAt: Date;
+        endedAt?: Date;
+        duration?: number;
+        actualOutcome?: Record<string, unknown>;
+        error?: string;
+    }): string {
+        const lines: string[] = [];
+
+        // Header
+        lines.push('');
+        lines.push('TEST EXECUTION RESULTS');
+        lines.push('='.repeat(80));
+
+        // Status
+        const statusIcon = result.success ? '✓' : '✗';
+        const statusText = result.success ? 'PASSED' : 'FAILED';
+        lines.push(`Status: ${statusIcon} ${statusText}`);
+        lines.push(`Duration: ${result.duration}ms`);
+        lines.push('');
+
+        // Message
+        if (result.message) {
+            lines.push(`Message: ${result.message}`);
+            lines.push('');
+        }
+
+        // Results
+        if (result.actualOutcome) {
+            lines.push('Results:');
+            if (result.actualOutcome.score !== undefined) {
+                lines.push(`  - Score: ${result.actualOutcome.score}`);
+            }
+            if (result.actualOutcome.passedChecks !== undefined && result.actualOutcome.totalChecks !== undefined) {
+                lines.push(`  - Checks: ${result.actualOutcome.passedChecks}/${result.actualOutcome.totalChecks} passed`);
+            }
+            if (result.actualOutcome.status) {
+                lines.push(`  - Final Status: ${result.actualOutcome.status}`);
+            }
+            lines.push('');
+        }
+
+        // Error
+        if (result.error) {
+            lines.push('Error Details:');
+            lines.push(`  ${result.error}`);
+            lines.push('');
+        }
+
+        // Footer
+        lines.push('='.repeat(80));
+        lines.push('');
+
+        return lines.join('\r\n');
     }
 
     /**

@@ -1,4 +1,5 @@
 import { RunView, UserInfo, BaseEntity } from '@memberjunction/core';
+import { TestEngine, TestRunOptions as EngineTestRunOptions } from '@memberjunction/testing-engine';
 import { OutputChannel } from '../common/OutputChannel';
 import { ConnectionService } from './ConnectionService';
 
@@ -109,6 +110,10 @@ export class TestService {
                 OutputChannel.warn('No user context available for Test Service');
                 return false;
             }
+
+            // Initialize TestEngine
+            const engine = TestEngine.Instance;
+            await engine.Config(false, this.contextUser as any); // Type mismatch between package versions
 
             this.initialized = true;
             OutputChannel.info('Test Service initialized successfully');
@@ -396,27 +401,78 @@ export class TestService {
         return null;
     }
 
-    private async executeTestViaEngine(testId: string, _options: TestRunOptions): Promise<MJTestResult> {
-        // TODO: Integrate with @memberjunction/testing-engine package
-        // For now, return a simulated result
+    private async executeTestViaEngine(testId: string, options: TestRunOptions): Promise<MJTestResult> {
         const startedAt = new Date();
 
-        // Simulate test execution delay
-        await new Promise(resolve => setTimeout(resolve, 100));
+        try {
+            // Get TestEngine instance
+            const engine = TestEngine.Instance;
 
-        const endedAt = new Date();
-        const duration = endedAt.getTime() - startedAt.getTime();
+            // Convert variables to proper format
+            const engineVariables: Record<string, string | number | boolean | Date> = {};
+            if (options.variables) {
+                for (const [key, value] of Object.entries(options.variables)) {
+                    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value instanceof Date) {
+                        engineVariables[key] = value;
+                    }
+                }
+            }
 
-        return {
-            testId,
-            testRunId: this.generateUUID(),
-            success: Math.random() > 0.2, // 80% pass rate for simulation
-            message: 'Test executed successfully',
-            startedAt,
-            endedAt,
-            duration,
-            actualOutcome: {}
-        };
+            // Execute the test using the real testing engine
+            const engineOptions: EngineTestRunOptions = {
+                verbose: options.verbose ?? false,
+                variables: engineVariables
+            };
+
+            const result = await engine.RunTest(
+                testId,
+                engineOptions,
+                this.contextUser as any // Type mismatch between package versions
+            );
+
+            // Handle array results (suite execution returns array)
+            const testResult = Array.isArray(result) ? result[0] : result;
+
+            const endedAt = new Date();
+
+            // Map TestEngine result to MJTestResult
+            return {
+                testId,
+                testRunId: testResult.testRunId || this.generateUUID(),
+                success: testResult.status === 'Passed',
+                message: testResult.status === 'Passed'
+                    ? `Test passed (score: ${testResult.score})`
+                    : `Test ${testResult.status.toLowerCase()}: ${testResult.errorMessage || 'See logs for details'}`,
+                startedAt,
+                endedAt,
+                duration: testResult.durationMs,
+                actualOutcome: {
+                    score: testResult.score,
+                    passedChecks: testResult.passedChecks,
+                    failedChecks: testResult.failedChecks,
+                    totalChecks: testResult.totalChecks,
+                    status: testResult.status
+                },
+                error: testResult.status !== 'Passed' ? testResult.errorMessage : undefined
+            };
+
+        } catch (error) {
+            const endedAt = new Date();
+            const duration = endedAt.getTime() - startedAt.getTime();
+
+            OutputChannel.error(`Test execution failed for ${testId}`, error as Error);
+
+            return {
+                testId,
+                testRunId: this.generateUUID(),
+                success: false,
+                message: 'Test execution failed',
+                startedAt,
+                endedAt,
+                duration,
+                error: (error as Error).message
+            };
+        }
     }
 
     private parseJSON(value: unknown): unknown {
