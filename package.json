@@ -43,6 +43,11 @@
           "when": "memberjunction.workspaceInitialized"
         },
         {
+          "id": "memberjunction.migrationExplorer",
+          "name": "Migrations",
+          "when": "memberjunction.workspaceInitialized"
+        },
+        {
           "id": "memberjunction.aiChatPanel",
           "name": "AI Assistant",
           "type": "webview",
@@ -136,6 +141,21 @@
           "type": "boolean",
           "default": true,
           "description": "Show test results inline in the editor"
+        },
+        "memberjunction.features.migrationManager.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Database Migration Manager"
+        },
+        "memberjunction.migrations.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh migrations when files change"
+        },
+        "memberjunction.migrations.confirmBeforeRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show confirmation dialog before running migrations"
         }
       }
     },
@@ -268,6 +288,32 @@
       {
         "command": "memberjunction.clearTestResults",
         "title": "MemberJunction: Clear Test Results"
+      },
+      {
+        "command": "memberjunction.testMigrations",
+        "title": "MemberJunction: Test Migration Discovery"
+      },
+      {
+        "command": "memberjunction.refreshMigrations",
+        "title": "Refresh Migrations",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memberjunction.runMigrations",
+        "title": "MemberJunction: Run Pending Migrations",
+        "icon": "$(play)"
+      },
+      {
+        "command": "memberjunction.previewMigrationSQL",
+        "title": "Preview SQL"
+      },
+      {
+        "command": "memberjunction.showMigrationStatus",
+        "title": "MemberJunction: Show Migration Status"
+      },
+      {
+        "command": "memberjunction.openMigrationsFolder",
+        "title": "Open Migrations Folder"
       }
     ],
     "menus": {
@@ -280,6 +326,16 @@
         {
           "command": "memberjunction.refreshEntityExplorer",
           "when": "view == memberjunction.entityExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memberjunction.refreshMigrations",
+          "when": "view == memberjunction.migrationExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.runMigrations",
+          "when": "view == memberjunction.migrationExplorer",
           "group": "navigation@2"
         }
       ],
@@ -312,6 +368,11 @@
         {
           "command": "memberjunction.goToEntity",
           "when": "view == memberjunction.entityExplorer && viewItem == field",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.previewMigrationSQL",
+          "when": "view == memberjunction.migrationExplorer && viewItem == migration",
           "group": "navigation@1"
         }
       ]

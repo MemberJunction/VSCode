@@ -8,6 +8,7 @@ import { EntityExplorerFeature } from './features/entity-explorer/EntityExplorer
 import { CodeGenFeature } from './features/codegen/CodeGenFeature';
 import { AIAssistanceFeature } from './features/ai-assistance/AIAssistanceFeature';
 import { TestExplorerFeature } from './features/test-explorer/TestExplorerFeature';
+import { MigrationManagerFeature } from './features/migration-manager/MigrationManagerFeature';
 import { OutputChannel } from './common/OutputChannel';
 import { StatusBarManager } from './common/StatusBarManager';
 
@@ -28,7 +29,8 @@ const features: Feature[] = [
     new EntityExplorerFeature(),
     new CodeGenFeature(),
     new AIAssistanceFeature(),
-    new TestExplorerFeature()
+    new TestExplorerFeature(),
+    new MigrationManagerFeature()
 ];
 
 /**
@@ -117,6 +119,57 @@ export async function activate(context: vscode.ExtensionContext) {
                 OutputChannel.info(`○ ${feature.name} disabled in settings`);
             }
         }
+
+        // Register test command for MigrationService
+        context.subscriptions.push(
+            vscode.commands.registerCommand('memberjunction.testMigrations', async () => {
+                const { MigrationService } = await import('./services/MigrationService');
+                const migrationService = MigrationService.getInstance();
+
+                OutputChannel.show();
+                OutputChannel.info('=== Testing MigrationService ===');
+
+                const initialized = await migrationService.initialize();
+                if (!initialized) {
+                    OutputChannel.error('Failed to initialize MigrationService');
+                    vscode.window.showErrorMessage('Migration Service failed to initialize');
+                    return;
+                }
+
+                OutputChannel.info('✓ MigrationService initialized');
+
+                await migrationService.refreshMigrations(true);
+                const migrations = migrationService.getMigrations();
+                const status = migrationService.getStatus();
+
+                OutputChannel.info(`\nMigration Status:`);
+                OutputChannel.info(`  Scanning: v3 migrations`);
+                OutputChannel.info(`  Total: ${status.total}`);
+                OutputChannel.info(`  Applied: ${status.applied}`);
+                OutputChannel.info(`  Pending: ${status.pending}`);
+                OutputChannel.info(`  Failed: ${status.failed}`);
+                OutputChannel.info(`  Needs Baseline: ${status.needsBaseline}`);
+                OutputChannel.info(`  Can Query Database: ${status.canQueryDatabase}`);
+
+                OutputChannel.info(`\nMigrations by Type:`);
+                const byType = migrations.reduce((acc, m) => {
+                    acc[m.type] = (acc[m.type] || 0) + 1;
+                    return acc;
+                }, {} as Record<string, number>);
+                for (const [type, count] of Object.entries(byType)) {
+                    OutputChannel.info(`  ${type}: ${count}`);
+                }
+
+                OutputChannel.info(`\nRecent Migrations (last 10):`);
+                migrations.slice(-10).forEach(m => {
+                    OutputChannel.info(`  ${m.status === 'applied' ? '✓' : '○'} ${m.fileName}`);
+                });
+
+                vscode.window.showInformationMessage(
+                    `Found ${status.total} migrations (${status.pending} pending, ${status.applied} applied)`
+                );
+            })
+        );
 
         // Register configuration change handler
         context.subscriptions.push(

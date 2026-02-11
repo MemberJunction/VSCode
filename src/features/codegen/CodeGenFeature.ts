@@ -169,10 +169,8 @@ export class CodeGenFeature implements Feature {
 
         if (autoRunEnabled) {
             this.scheduleAutoRun();
-        } else {
-            // Show notification for manual action
-            this.showCodeGenNeededNotification();
         }
+        // Status bar will update automatically via event listeners
     }
 
     /**
@@ -283,26 +281,6 @@ export class CodeGenFeature implements Feature {
                 }
             }
         );
-    }
-
-    /**
-     * Show notification when CodeGen is needed
-     */
-    private showCodeGenNeededNotification(): void {
-        const changes = this.codeGenService.pendingChanges;
-
-        vscode.window.showInformationMessage(
-            `CodeGen may be needed: ${changes.length} change(s) detected`,
-            'Run CodeGen',
-            'Run (Skip DB)',
-            'Dismiss'
-        ).then(selection => {
-            if (selection === 'Run CodeGen') {
-                vscode.commands.executeCommand('memberjunction.runCodeGen');
-            } else if (selection === 'Run (Skip DB)') {
-                vscode.commands.executeCommand('memberjunction.runCodeGenSkipDb');
-            }
-        });
     }
 
     /**
