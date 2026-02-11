@@ -19,7 +19,7 @@ export class MJSyncSchemaGenerator {
     /**
      * Generate schema for root-level .mj-sync.json
      */
-    public generateRootSyncSchema(): any {
+    public generateRootSyncSchema(): Record<string, unknown> {
         // EntityDiscovery not needed for root config, but keeping for consistency
         // const entityDiscovery = EntityDiscovery.getInstance();
         // const entities = entityDiscovery.getAllEntities();
@@ -117,7 +117,7 @@ export class MJSyncSchemaGenerator {
     /**
      * Generate schema for entity-level .mj-sync.json
      */
-    public generateEntitySyncSchema(): any {
+    public generateEntitySyncSchema(): Record<string, unknown> {
         const entityDiscovery = EntityDiscovery.getInstance();
         const entities = entityDiscovery.getAllEntities();
         const entityNames = entities.map(e => e.name);
@@ -310,7 +310,7 @@ export class MJSyncSchemaGenerator {
     /**
      * Generate schema for entity record files (the actual data files)
      */
-    public generateEntityRecordSchema(entityName?: string): any {
+    public generateEntityRecordSchema(entityName?: string): Record<string, unknown> {
         const entityDiscovery = EntityDiscovery.getInstance();
         let entity: EntityInfo | undefined;
 
@@ -322,7 +322,7 @@ export class MJSyncSchemaGenerator {
         // const entityNames = entityDiscovery.getAllEntities().map(e => e.name);
 
         // Build field properties if we have a specific entity
-        let fieldProperties: any = {};
+        const fieldProperties: Record<string, unknown> = {};
         if (entity) {
             for (const field of entity.fields) {
                 fieldProperties[field.name] = {
@@ -401,7 +401,7 @@ export class MJSyncSchemaGenerator {
     /**
      * Helper to get JSON schema type from SQL type
      */
-    private getFieldTypeSchema(sqlType: string): any {
+    private getFieldTypeSchema(sqlType: string): Record<string, unknown> {
         const type = sqlType.toLowerCase();
 
         if (type.includes('int') || type.includes('numeric') || type.includes('decimal')) {

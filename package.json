@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "memberjunction",
   "license": "MIT",
+  "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -25,6 +26,41 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "memberjunction",
+          "title": "MemberJunction",
+          "icon": "resources/mj-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "memberjunction": [
+        {
+          "id": "memberjunction.entityExplorer",
+          "name": "Entity Explorer",
+          "when": "memberjunction.workspaceInitialized"
+        },
+        {
+          "id": "memberjunction.migrationExplorer",
+          "name": "Migrations",
+          "when": "memberjunction.workspaceInitialized"
+        },
+        {
+          "id": "memberjunction.aiChatPanel",
+          "name": "AI Assistant",
+          "type": "webview",
+          "when": "memberjunction.workspaceInitialized"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "memberjunction.entityExplorer",
+        "contents": "No entities loaded.\n[Connect to Database](command:memberjunction.connect)\n[Connection Help](command:memberjunction.showConnectionHelp)"
+      }
+    ],
     "configuration": {
       "title": "MemberJunction",
       "properties": {
@@ -32,6 +68,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable Metadata Sync features"
+        },
+        "memberjunction.features.entityExplorer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Entity Explorer sidebar"
         },
         "memberjunction.metadataSync.autoValidate": {
           "type": "boolean",
@@ -42,6 +83,79 @@
           "type": "boolean",
           "default": true,
           "description": "Show metadata sync status in status bar"
+        },
+        "memberjunction.features.codegen.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable CodeGen feature for detecting and running code generation"
+        },
+        "memberjunction.codegen.autoDetect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically detect when CodeGen is needed based on file changes"
+        },
+        "memberjunction.codegen.autoRun": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run CodeGen when SQL file changes are detected"
+        },
+        "memberjunction.codegen.autoRunDelay": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "Delay in milliseconds before auto-running CodeGen after changes detected"
+        },
+        "memberjunction.codegen.autoRunSkipDb": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use --skipdb flag when auto-running CodeGen"
+        },
+        "memberjunction.features.aiAssistance.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI Assistance features"
+        },
+        "memberjunction.aiAssistance.autoSuggest": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show context-aware AI suggestions automatically"
+        },
+        "memberjunction.aiAssistance.preferredModel": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "gpt-4", "claude", "gemini"],
+          "description": "Preferred AI model for assistance (requires API keys configured in MJ)"
+        },
+        "memberjunction.features.testExplorer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Test Explorer integration with MemberJunction Testing Framework"
+        },
+        "memberjunction.testExplorer.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh tests when database connection changes"
+        },
+        "memberjunction.testExplorer.showInlineResults": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show test results inline in the editor"
+        },
+        "memberjunction.features.migrationManager.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Database Migration Manager"
+        },
+        "memberjunction.migrations.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh migrations when files change"
+        },
+        "memberjunction.migrations.confirmBeforeRun": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show confirmation dialog before running migrations"
         }
       }
     },
@@ -49,8 +163,220 @@
       {
         "command": "memberjunction.validateMetadata",
         "title": "MemberJunction: Validate Metadata File"
+      },
+      {
+        "command": "memberjunction.connect",
+        "title": "MemberJunction: Connect to Database"
+      },
+      {
+        "command": "memberjunction.reconnect",
+        "title": "MemberJunction: Reconnect to Database"
+      },
+      {
+        "command": "memberjunction.showConnectionHelp",
+        "title": "MemberJunction: Connection Help"
+      },
+      {
+        "command": "memberjunction.refreshEntityExplorer",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memberjunction.searchEntities",
+        "title": "Search Entities",
+        "icon": "$(search)"
+      },
+      {
+        "command": "memberjunction.clearEntityFilter",
+        "title": "Clear Filter",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "memberjunction.openEntityFile",
+        "title": "Open Entity File"
+      },
+      {
+        "command": "memberjunction.goToEntity",
+        "title": "Go to Entity"
+      },
+      {
+        "command": "memberjunction.showEntityDetails",
+        "title": "Show Details"
+      },
+      {
+        "command": "memberjunction.copyEntityName",
+        "title": "Copy Entity Name"
+      },
+      {
+        "command": "memberjunction.copyFieldName",
+        "title": "Copy Field Name"
+      },
+      {
+        "command": "memberjunction.disconnect",
+        "title": "MemberJunction: Disconnect from Database"
+      },
+      {
+        "command": "memberjunction.focusEntityExplorer",
+        "title": "MemberJunction: Show Entity Explorer"
+      },
+      {
+        "command": "memberjunction.runCodeGen",
+        "title": "MemberJunction: Run CodeGen",
+        "icon": "$(play)"
+      },
+      {
+        "command": "memberjunction.runCodeGenSkipDb",
+        "title": "MemberJunction: Run CodeGen (Skip Database)"
+      },
+      {
+        "command": "memberjunction.previewCodeGen",
+        "title": "MemberJunction: Preview CodeGen Changes",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "memberjunction.showCodeGenStatus",
+        "title": "MemberJunction: Show CodeGen Status"
+      },
+      {
+        "command": "memberjunction.clearCodeGenChanges",
+        "title": "MemberJunction: Clear Pending CodeGen Changes"
+      },
+      {
+        "command": "memberjunction.cancelAutoRun",
+        "title": "MemberJunction: Cancel CodeGen Auto-Run"
+      },
+      {
+        "command": "memberjunction.openAIChat",
+        "title": "MemberJunction: Open AI Assistant",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "memberjunction.askAIAboutEntity",
+        "title": "Ask AI About This Entity"
+      },
+      {
+        "command": "memberjunction.askAIToExplain",
+        "title": "Ask AI to Explain This Code"
+      },
+      {
+        "command": "memberjunction.askAIToGenerate",
+        "title": "Ask AI to Generate Code"
+      },
+      {
+        "command": "memberjunction.clearAIChat",
+        "title": "MemberJunction: Clear AI Chat History"
+      },
+      {
+        "command": "memberjunction.listAIAgents",
+        "title": "MemberJunction: Select AI Agent",
+        "icon": "$(robot)"
+      },
+      {
+        "command": "memberjunction.refreshAIAgents",
+        "title": "MemberJunction: Refresh AI Agents"
+      },
+      {
+        "command": "memberjunction.refreshTests",
+        "title": "MemberJunction: Refresh Tests",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memberjunction.runAllTests",
+        "title": "MemberJunction: Run All Tests",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "memberjunction.clearTestResults",
+        "title": "MemberJunction: Clear Test Results"
+      },
+      {
+        "command": "memberjunction.testMigrations",
+        "title": "MemberJunction: Test Migration Discovery"
+      },
+      {
+        "command": "memberjunction.refreshMigrations",
+        "title": "Refresh Migrations",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memberjunction.runMigrations",
+        "title": "MemberJunction: Run Pending Migrations",
+        "icon": "$(play)"
+      },
+      {
+        "command": "memberjunction.previewMigrationSQL",
+        "title": "Preview SQL"
+      },
+      {
+        "command": "memberjunction.showMigrationStatus",
+        "title": "MemberJunction: Show Migration Status"
+      },
+      {
+        "command": "memberjunction.openMigrationsFolder",
+        "title": "Open Migrations Folder"
       }
-    ]
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "memberjunction.searchEntities",
+          "when": "view == memberjunction.entityExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.refreshEntityExplorer",
+          "when": "view == memberjunction.entityExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memberjunction.refreshMigrations",
+          "when": "view == memberjunction.migrationExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.runMigrations",
+          "when": "view == memberjunction.migrationExplorer",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "memberjunction.showEntityDetails",
+          "when": "view == memberjunction.entityExplorer && viewItem == entity",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.openEntityFile",
+          "when": "view == memberjunction.entityExplorer && viewItem == entity",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memberjunction.askAIAboutEntity",
+          "when": "view == memberjunction.entityExplorer && viewItem == entity",
+          "group": "ai@1"
+        },
+        {
+          "command": "memberjunction.copyEntityName",
+          "when": "view == memberjunction.entityExplorer && viewItem == entity",
+          "group": "copy@1"
+        },
+        {
+          "command": "memberjunction.copyFieldName",
+          "when": "view == memberjunction.entityExplorer && viewItem == field",
+          "group": "copy@1"
+        },
+        {
+          "command": "memberjunction.goToEntity",
+          "when": "view == memberjunction.entityExplorer && viewItem == field",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.previewMigrationSQL",
+          "when": "view == memberjunction.migrationExplorer && viewItem == migration",
+          "group": "navigation@1"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -63,9 +389,21 @@
     "publish": "vsce publish"
   },
   "dependencies": {
-    "@memberjunction/core": "^2.46.0",
-    "@memberjunction/core-entities": "^2.46.0",
-    "@memberjunction/global": "^2.46.0",
+    "@memberjunction/ai": "^3.2.0",
+    "@memberjunction/ai-agents": "^3.2.0",
+    "@memberjunction/ai-anthropic": "^3.2.0",
+    "@memberjunction/ai-core-plus": "^3.2.0",
+    "@memberjunction/ai-groq": "^3.2.0",
+    "@memberjunction/ai-local-embeddings": "^3.2.0",
+    "@memberjunction/ai-openai": "^3.2.0",
+    "@memberjunction/ai-prompts": "^3.2.0",
+    "@memberjunction/core": "^3.2.0",
+    "@memberjunction/core-actions": "^3.2.0",
+    "@memberjunction/core-entities": "^3.2.0",
+    "@memberjunction/global": "^3.2.0",
+    "@memberjunction/metadata-sync": "^3.2.0",
+    "@memberjunction/testing-engine": "^3.2.0",
+    "dotenv": "^16.4.5",
     "glob": "^10.3.10"
   },
   "devDependencies": {

@@ -39,6 +39,50 @@ export class StatusBarManager {
         }
     }
 
+    /**
+     * Update with rich tooltip using MarkdownString
+     */
+    public static updateWithMarkdown(
+        id: string,
+        text: string,
+        tooltip: vscode.MarkdownString,
+        command?: string
+    ): void {
+        const item = this.items.get(id);
+        if (item) {
+            item.text = text;
+            item.tooltip = tooltip;
+            if (command) {
+                item.command = command;
+            }
+            item.show();
+        }
+    }
+
+    /**
+     * Update with background color for emphasis
+     */
+    public static updateWithColor(
+        id: string,
+        text: string,
+        tooltip?: string,
+        command?: string,
+        backgroundColor?: vscode.ThemeColor
+    ): void {
+        const item = this.items.get(id);
+        if (item) {
+            item.text = text;
+            if (tooltip) {
+                item.tooltip = tooltip;
+            }
+            if (command) {
+                item.command = command;
+            }
+            item.backgroundColor = backgroundColor;
+            item.show();
+        }
+    }
+
     public static hide(id: string): void {
         const item = this.items.get(id);
         if (item) {

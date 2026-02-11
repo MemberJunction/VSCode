@@ -32,13 +32,18 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
         const lineText = document.lineAt(position.line).text;
         const beforeCursor = lineText.substring(0, position.character);
 
+        OutputChannel.info(`Completion triggered: ${fileName}, line ${position.line}, char ${position.character}`);
+        OutputChannel.info(`Before cursor: "${beforeCursor}"`);
+
         try {
             // Check if this is a .mj-sync.json file
             if (fileName.endsWith('.mj-sync.json')) {
+                OutputChannel.info('Providing .mj-sync.json completions');
                 return await this.provideSyncConfigCompletions(document, position, beforeCursor);
             }
 
             // Otherwise, it's an entity record file
+            OutputChannel.info('Providing entity record completions');
             return await this.provideEntityRecordCompletions(document, position, beforeCursor);
         } catch (error) {
             OutputChannel.error('Error providing completions', error as Error);
@@ -51,15 +56,18 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
      */
     private async provideSyncConfigCompletions(
         _document: vscode.TextDocument,
-        _position: vscode.Position,
+        position: vscode.Position,
         beforeCursor: string
     ): Promise<vscode.CompletionItem[]> {
         const completions: vscode.CompletionItem[] = [];
 
+        // Check if user has already typed an opening quote
+        const { hasOpenQuote, startPos } = this.getEntityNamePrefix(beforeCursor);
+
         // Check if completing entity name
         if (beforeCursor.includes('"entity"') || beforeCursor.includes('entity')) {
             const entities = this.entityDiscovery.getAllEntities();
-            return entities.map(entity => {
+            return entities.map((entity, index) => {
                 const item = new vscode.CompletionItem(entity.name, vscode.CompletionItemKind.Class);
                 item.detail = `${entity.isCore ? 'Core' : 'Custom'} Entity`;
                 item.documentation = new vscode.MarkdownString(
@@ -68,7 +76,19 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
                     `Fields: ${entity.fields.length}\n\n` +
                     `${entity.description || ''}`
                 );
-                item.insertText = `"${entity.name}"`;
+                // Don't include quotes if user already typed opening quote
+                if (hasOpenQuote) {
+                    item.insertText = entity.name;
+                    item.range = new vscode.Range(
+                        position.line, startPos + 1, // +1 to start after the opening quote
+                        position.line, position.character
+                    );
+                } else {
+                    item.insertText = `"${entity.name}"`;
+                }
+                item.filterText = hasOpenQuote ? entity.name : `"${entity.name}`;
+                // Sort MJ completions at the top
+                item.sortText = `0_${index.toString().padStart(4, '0')}_${entity.name}`;
                 return item;
             });
         }
@@ -79,12 +99,42 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
             return entities.map(entity => {
                 const item = new vscode.CompletionItem(entity.name, vscode.CompletionItemKind.Reference);
                 item.detail = 'Lookup Entity';
-                item.insertText = `"${entity.name}"`;
+                // Don't include quotes if user already typed opening quote
+                if (hasOpenQuote) {
+                    item.insertText = entity.name;
+                    item.range = new vscode.Range(
+                        position.line, startPos + 1,
+                        position.line, position.character
+                    );
+                } else {
+                    item.insertText = `"${entity.name}"`;
+                }
+                item.filterText = hasOpenQuote ? entity.name : `"${entity.name}`;
                 return item;
             });
         }
 
         return completions;
+    }
+
+    /**
+     * Determine if user has typed an opening quote for an entity name value
+     */
+    private getEntityNamePrefix(beforeCursor: string): { prefix: string; hasOpenQuote: boolean; startPos: number } {
+        const trimmed = beforeCursor.trimEnd();
+
+        // Check for pattern like: `"entity": "AI` (started typing entity name with quote)
+        // Match after a colon followed by optional whitespace and an opening quote
+        const valueMatch = trimmed.match(/:\s*"([^"]*)$/);
+        if (valueMatch) {
+            return {
+                prefix: valueMatch[1],
+                hasOpenQuote: true,
+                startPos: beforeCursor.lastIndexOf('"')
+            };
+        }
+
+        return { prefix: '', hasOpenQuote: false, startPos: beforeCursor.length };
     }
 
     /**
@@ -97,18 +147,24 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
     ): Promise<vscode.CompletionItem[]> {
         // Get entity name for this file
         const entityName = await this.rootDiscovery.getEntityNameForFile(document.fileName);
+        OutputChannel.info(`Entity for file: ${entityName || 'NOT FOUND'}`);
 
         if (!entityName) {
+            OutputChannel.warn('No entity found for file - no completions available');
             return [];
         }
 
         const entity = this.entityDiscovery.getEntity(entityName);
         if (!entity) {
+            OutputChannel.warn(`Entity "${entityName}" not found in discovery`);
             return [];
         }
 
+        OutputChannel.info(`Found entity: ${entity.name} with ${entity.fields.length} fields`);
+
         // Get cursor context to determine which entity's fields we should suggest
         const context = this.getCursorContext(document, position);
+        OutputChannel.info(`Cursor context: inFields=${context.inFields}, inRelatedEntities=${context.inRelatedEntities}, relatedEntity=${context.relatedEntityName || 'none'}`);
 
         // Check if we're in a "fields" object
         if (context.inFields) {
@@ -122,9 +178,13 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
                 }
             }
 
-            return targetEntity.fields.map(field => {
+            // Determine if user has started typing a field name
+            const { prefix, hasOpenQuote, startPos } = this.getFieldNamePrefix(beforeCursor);
+            OutputChannel.info(`Field prefix: "${prefix}", hasOpenQuote: ${hasOpenQuote}, startPos: ${startPos}`);
+
+            return targetEntity.fields.map((field, index) => {
                 const item = new vscode.CompletionItem(field.name, vscode.CompletionItemKind.Field);
-                item.detail = field.type + (field.length ? `(${field.length})` : '');
+                item.detail = `${field.type}${field.length ? `(${field.length})` : ''} - ${targetEntity.name}`;
                 item.documentation = new vscode.MarkdownString(
                     `**${field.displayName}**\n\n` +
                     `Entity: \`${targetEntity.name}\`\n\n` +
@@ -135,8 +195,31 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
                     `${field.description || ''}`
                 );
 
-                // Add snippet for metadata keyword option
-                item.insertText = new vscode.SnippetString(`"${field.name}": "\${1:value}"`);
+                // Set appropriate insertText based on whether user started with a quote
+                if (hasOpenQuote) {
+                    // User already typed opening quote, don't include it in insert
+                    item.insertText = new vscode.SnippetString(`${field.name}": "\${1:value}"`);
+                    // Set range to replace from the opening quote
+                    item.range = new vscode.Range(
+                        position.line, startPos,
+                        position.line, position.character
+                    );
+                } else {
+                    // User hasn't typed quote yet, include full field definition
+                    item.insertText = new vscode.SnippetString(`"${field.name}": "\${1:value}"`);
+                }
+
+                // Use filterText to help VSCode match when user types partial field name
+                // Also include quote prefix so it matches when user types "
+                item.filterText = hasOpenQuote ? field.name : `"${field.name}`;
+
+                // Sort MJ completions at the top (before VSCode defaults)
+                item.sortText = `0_${index.toString().padStart(4, '0')}_${field.name}`;
+
+                // Preselect first item for convenience
+                if (index === 0) {
+                    item.preselect = true;
+                }
 
                 return item;
             });
@@ -190,6 +273,7 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
     /**
      * Get context information about cursor position in JSON structure
      * Determines if we're in fields, and if so, which entity's fields
+     * Properly handles JSON string contents to avoid false bracket matches
      */
     private getCursorContext(document: vscode.TextDocument, position: vscode.Position): CursorContext {
         const context: CursorContext = {
@@ -197,80 +281,130 @@ export class MJSyncCompletionProvider implements vscode.CompletionItemProvider {
             inRelatedEntities: false
         };
 
-        let bracketCount = 0;
-        let inFieldsDepth = -1;
+        // Get all text from document start to cursor position
+        const textToCursor = document.getText(new vscode.Range(
+            new vscode.Position(0, 0),
+            position
+        ));
+
+        // Find all "fields": { positions and track bracket depth
+        let inFieldsBlock = false;
+        let bracketDepth = 0;
+        let fieldsStartDepth = -1;
+
+        // Track if we're in relatedEntities
+        let inRelatedEntitiesBlock = false;
+        let relatedEntitiesStartDepth = -1;
         let relatedEntityName: string | undefined;
 
-        // Scan backwards from cursor to determine context
-        for (let lineNum = position.line; lineNum >= 0; lineNum--) {
-            const line = document.lineAt(lineNum).text;
-            const searchText = lineNum === position.line
-                ? line.substring(0, position.character)
-                : line;
+        // Track if we're inside a JSON string (to skip string contents)
+        let inString = false;
 
-            // Scan backwards through the line
-            for (let i = searchText.length - 1; i >= 0; i--) {
-                const char = searchText[i];
+        // Simple state machine to track JSON structure
+        let i = 0;
+        while (i < textToCursor.length) {
+            const char = textToCursor[i];
+            const prevChar = i > 0 ? textToCursor[i - 1] : '';
 
-                if (char === '}') {
-                    bracketCount++;
-                } else if (char === '{') {
-                    bracketCount--;
+            // Handle string boundaries (skip string contents)
+            if (char === '"' && prevChar !== '\\') {
+                inString = !inString;
+                i++;
+                continue;
+            }
 
-                    // Check if this opening bracket belongs to something we care about
-                    if (bracketCount < 0) {
-                        const beforeBracket = searchText.substring(0, i).trim();
+            // Skip everything inside strings
+            if (inString) {
+                i++;
+                continue;
+            }
 
-                        // Check if we just exited a "fields" object
-                        if (beforeBracket.endsWith('"fields":') || beforeBracket.endsWith('"fields" :')) {
-                            if (inFieldsDepth === -1) {
-                                // We're inside the fields object
-                                context.inFields = true;
-                                inFieldsDepth = bracketCount;
-                            }
+            if (char === '{') {
+                bracketDepth++;
+
+                // Check what came before this bracket
+                const beforeBracket = textToCursor.substring(0, i).trim();
+
+                // Check for "fields":
+                if (beforeBracket.endsWith('"fields":') || beforeBracket.match(/"fields"\s*:\s*$/)) {
+                    inFieldsBlock = true;
+                    fieldsStartDepth = bracketDepth;
+                    OutputChannel.info(`Found fields block at depth ${bracketDepth}`);
+                }
+
+                // Check for "relatedEntities":
+                if (beforeBracket.endsWith('"relatedEntities":') || beforeBracket.match(/"relatedEntities"\s*:\s*$/)) {
+                    inRelatedEntitiesBlock = true;
+                    relatedEntitiesStartDepth = bracketDepth;
+                }
+
+                // Check for entity name in relatedEntities (pattern: "EntityName": {)
+                if (inRelatedEntitiesBlock && !relatedEntityName) {
+                    const entityMatch = beforeBracket.match(/"([^"]+)"\s*:\s*$/);
+                    if (entityMatch) {
+                        const possibleEntityName = entityMatch[1];
+                        // Entity names often have spaces or colons
+                        if (possibleEntityName !== 'fields' && possibleEntityName !== 'relatedEntities') {
+                            relatedEntityName = possibleEntityName;
                         }
-
-                        // Check if we're in a relatedEntities section
-                        // Look for pattern like "EntityName": {
-                        const entityMatch = beforeBracket.match(/"([^"]+)"\s*:\s*$/);
-                        if (entityMatch && !relatedEntityName) {
-                            // Check if this is inside relatedEntities by looking further back
-                            const textBeforeEntity = document.getText(new vscode.Range(
-                                new vscode.Position(Math.max(0, lineNum - 20), 0),
-                                new vscode.Position(lineNum, i)
-                            ));
-
-                            if (textBeforeEntity.includes('"relatedEntities"')) {
-                                // Try to find the entity name by looking for patterns
-                                const possibleEntityName = entityMatch[1];
-
-                                // Check if this looks like a related entity key (not a field name)
-                                if (possibleEntityName.includes(':') || possibleEntityName.includes(' ')) {
-                                    // Likely an entity name (e.g., "Action Params", "MJ: AI Prompt Models")
-                                    relatedEntityName = possibleEntityName;
-                                    context.inRelatedEntities = true;
-                                }
-                            }
-                        }
-                    }
-
-                    // Reset bracket count at each level
-                    if (bracketCount < 0) {
-                        bracketCount = 0;
                     }
                 }
+            } else if (char === '}') {
+                // Check if we're exiting a tracked block
+                if (inFieldsBlock && bracketDepth === fieldsStartDepth) {
+                    inFieldsBlock = false;
+                    fieldsStartDepth = -1;
+                }
+                if (inRelatedEntitiesBlock && bracketDepth === relatedEntitiesStartDepth) {
+                    inRelatedEntitiesBlock = false;
+                    relatedEntitiesStartDepth = -1;
+                    relatedEntityName = undefined;
+                }
+                bracketDepth--;
             }
 
-            // If we found fields and went back far enough, we can stop
-            if (context.inFields && lineNum < position.line - 50) {
-                break;
-            }
+            i++;
         }
 
+        context.inFields = inFieldsBlock;
+        context.inRelatedEntities = inRelatedEntitiesBlock;
         if (relatedEntityName) {
             context.relatedEntityName = relatedEntityName;
         }
 
+        OutputChannel.info(`Context detection: inFields=${context.inFields}, depth=${bracketDepth}, fieldsDepth=${fieldsStartDepth}`);
+
         return context;
+    }
+
+    /**
+     * Determine what prefix the user has typed for a field name
+     * Returns the prefix (without quotes) and whether they started with a quote
+     */
+    private getFieldNamePrefix(beforeCursor: string): { prefix: string; hasOpenQuote: boolean; startPos: number } {
+        // Check if user has started typing a field name (with or without quote)
+        const trimmed = beforeCursor.trimEnd();
+
+        // Check for pattern like: `    "Na` (started typing field name with quote)
+        const quoteMatch = trimmed.match(/"([^":]*)$/);
+        if (quoteMatch) {
+            return {
+                prefix: quoteMatch[1],
+                hasOpenQuote: true,
+                startPos: beforeCursor.lastIndexOf('"')
+            };
+        }
+
+        // Check for pattern at start of value position (after colon and whitespace)
+        // This handles the case where we're typing a new field name without quote yet
+        if (trimmed.match(/[,{]\s*$/) || trimmed.match(/^\s*$/)) {
+            return {
+                prefix: '',
+                hasOpenQuote: false,
+                startPos: beforeCursor.length
+            };
+        }
+
+        return { prefix: '', hasOpenQuote: false, startPos: beforeCursor.length };
     }
 }

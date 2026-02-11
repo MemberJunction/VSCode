@@ -108,6 +108,59 @@ export class MetadataRootDiscovery {
     }
 
     /**
+     * Synchronous version of getEntityNameForFile for use in sync contexts
+     * Uses cached configs when available, reads synchronously otherwise
+     */
+    public getEntityNameForFileSync(filePath: string): string | null {
+        let currentDir = path.dirname(filePath);
+
+        // Walk up looking for entity-level .mj-sync.json
+        while (true) {
+            const config = this.getConfigSync(currentDir);
+
+            if (config?.entity) {
+                // Found entity-level config
+                return config.entity;
+            }
+
+            if (config && this.isRootConfig(config)) {
+                // Reached root without finding entity config
+                return null;
+            }
+
+            const parentDir = path.dirname(currentDir);
+            if (parentDir === currentDir) {
+                // Reached filesystem root
+                return null;
+            }
+
+            currentDir = parentDir;
+        }
+    }
+
+    /**
+     * Synchronous version of getConfig
+     */
+    private getConfigSync(dirPath: string): MJSyncConfig | null {
+        // Check cache first
+        if (this.configCache.has(dirPath)) {
+            return this.configCache.get(dirPath) || null;
+        }
+
+        const configPath = path.join(dirPath, '.mj-sync.json');
+
+        try {
+            const content = fs.readFileSync(configPath, 'utf-8');
+            const config = JSON.parse(content);
+            this.configCache.set(dirPath, config);
+            return config;
+        } catch {
+            this.configCache.set(dirPath, null!);
+            return null;
+        }
+    }
+
+    /**
      * Walk up directory tree to find metadata root
      */
     private async walkUpToFindRoot(startDir: string): Promise<string | null> {
