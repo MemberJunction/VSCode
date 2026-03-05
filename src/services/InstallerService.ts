@@ -23,6 +23,7 @@ import type {
     DoctorOptions,
     VersionInfo,
     PhaseId,
+    SqlConnectivityResult,
 } from '@memberjunction/installer';
 
 // Bypass TypeScript's CommonJS transformation of import() → require().
@@ -95,10 +96,13 @@ export class InstallerService {
     private _onStatusChange = new vscode.EventEmitter<InstallerStatus>();
     private _onPhaseUpdate = new vscode.EventEmitter<PhaseDisplayState[]>();
     private _onDiagnosticUpdate = new vscode.EventEmitter<DiagnosticDisplayState[]>();
+    private _onLogEntry = new vscode.EventEmitter<{ Level: string; Message: string }>();
 
     public readonly onStatusChange = this._onStatusChange.event;
     public readonly onPhaseUpdate = this._onPhaseUpdate.event;
     public readonly onDiagnosticUpdate = this._onDiagnosticUpdate.event;
+    /** Log entries from the engine (info, verbose, warn, error). */
+    public readonly onLogEntry = this._onLogEntry.event;
 
     private constructor() {}
 
@@ -264,6 +268,20 @@ export class InstallerService {
         OutputChannel.warn('Install operation cancelled by user');
     }
 
+    /**
+     * Test TCP connectivity to a SQL Server instance.
+     *
+     * Uses the installer's `SqlServerAdapter` for a lightweight TCP-only check
+     * (no SQL authentication). Suitable for preflight validation from the wizard.
+     */
+    async testConnection(host: string, port: number): Promise<SqlConnectivityResult> {
+        if (!this.installerModule) {
+            this.installerModule = await esmImport('@memberjunction/installer');
+        }
+        const adapter = new this.installerModule.SqlServerAdapter();
+        return adapter.CheckConnectivity(host, port);
+    }
+
     // -----------------------------------------------------------------------
     // Event handlers
     // -----------------------------------------------------------------------
@@ -320,15 +338,18 @@ export class InstallerService {
             // Verbose — only log to channel, not shown unless user opens it
             OutputChannel.log(`[VERBOSE] ${e.Message}`);
         }
+        this._onLogEntry.fire({ Level: e.Level, Message: e.Message });
     }
 
     private handleWarn(e: WarnEvent): void {
         OutputChannel.warn(e.Message);
         vscode.window.showWarningMessage(`MJ Installer: ${e.Message}`);
+        this._onLogEntry.fire({ Level: 'warn', Message: e.Message });
     }
 
     private handleError(e: ErrorEvent): void {
         OutputChannel.error(`[${e.Phase}] ${e.Error.message}`);
+        this._onLogEntry.fire({ Level: 'error', Message: `[${e.Phase}] ${e.Error.message}` });
 
         vscode.window.showErrorMessage(
             `MJ Installer Error (${e.Phase}): ${e.Error.message}`,
@@ -470,5 +491,6 @@ export class InstallerService {
         this._onStatusChange.dispose();
         this._onPhaseUpdate.dispose();
         this._onDiagnosticUpdate.dispose();
+        this._onLogEntry.dispose();
     }
 }
