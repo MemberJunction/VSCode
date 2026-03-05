@@ -52,6 +52,11 @@
           "name": "AI Assistant",
           "type": "webview",
           "when": "memberjunction.workspaceInitialized"
+        },
+        {
+          "id": "memberjunction.installerPhases",
+          "name": "Installer",
+          "when": "memberjunction.workspaceInitialized"
         }
       ]
     },
@@ -146,6 +151,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable Database Migration Manager"
+        },
+        "memberjunction.features.installer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable MJ Installer integration (install, doctor, resume)"
         },
         "memberjunction.migrations.autoRefresh": {
           "type": "boolean",
@@ -314,6 +324,28 @@
       {
         "command": "memberjunction.openMigrationsFolder",
         "title": "Open Migrations Folder"
+      },
+      {
+        "command": "memberjunction.install",
+        "title": "MemberJunction: Install",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "memberjunction.installDoctor",
+        "title": "MemberJunction: Doctor (Diagnose Install)",
+        "icon": "$(stethoscope)"
+      },
+      {
+        "command": "memberjunction.installResume",
+        "title": "MemberJunction: Resume Install"
+      },
+      {
+        "command": "memberjunction.showInstallLog",
+        "title": "MemberJunction: Show Install Log"
+      },
+      {
+        "command": "memberjunction.cancelInstall",
+        "title": "MemberJunction: Cancel Install"
       }
     ],
     "menus": {
@@ -336,6 +368,16 @@
         {
           "command": "memberjunction.runMigrations",
           "when": "view == memberjunction.migrationExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memberjunction.install",
+          "when": "view == memberjunction.installerPhases",
+          "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.installDoctor",
+          "when": "view == memberjunction.installerPhases",
           "group": "navigation@2"
         }
       ],
@@ -402,6 +444,7 @@
     "@memberjunction/core-entities": "^3.2.0",
     "@memberjunction/global": "^3.2.0",
     "@memberjunction/metadata-sync": "^3.2.0",
+    "@memberjunction/installer": "^5.7.0",
     "@memberjunction/testing-engine": "^3.2.0",
     "dotenv": "^16.4.5",
     "glob": "^10.3.10"
