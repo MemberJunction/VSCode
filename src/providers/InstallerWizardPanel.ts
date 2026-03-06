@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import { InstallerService, InstallerStatus, PhaseDisplayState, DiagnosticDisplayState } from '../services/InstallerService';
 import { OutputChannel } from '../common/OutputChannel';
 
@@ -132,6 +133,18 @@ export class InstallerWizardPanel {
             })
         );
 
+        // Step progress forwarding (download %, build progress)
+        this.serviceListeners.push(
+            this.service.onStepProgress((progress) => {
+                this.sendMessage({
+                    type: 'stepProgress',
+                    phase: progress.Phase,
+                    message: progress.Message,
+                    percent: progress.Percent,
+                });
+            })
+        );
+
         // Log entry forwarding (if the service exposes it)
         if (this.service.onLogEntry) {
             this.serviceListeners.push(
@@ -194,6 +207,32 @@ export class InstallerWizardPanel {
             case 'showLog':
                 OutputChannel.show();
                 break;
+
+            case 'checkState':
+                await this.handleCheckState(message.targetDir as string);
+                break;
+
+            case 'loadConfig':
+                await this.handleLoadConfig();
+                break;
+
+            case 'saveConfig':
+                await this.handleSaveConfig(message.config as Record<string, unknown>);
+                break;
+
+            case 'openFolder': {
+                const uri = vscode.Uri.file(message.path as string);
+                await vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: false });
+                break;
+            }
+
+            case 'dryRun':
+                await this.handleDryRun(message.planInput as CreatePlanInput);
+                break;
+
+            case 'showInfo':
+                vscode.window.showInformationMessage(String(message.text));
+                break;
         }
     }
 
@@ -202,7 +241,31 @@ export class InstallerWizardPanel {
             name: f.name,
             path: f.uri.fsPath,
         }));
-        this.sendMessage({ type: 'init', workspaceFolders });
+        this.sendMessage({ type: 'init', workspaceFolders, phaseLabels: this.service.phaseLabels });
+
+        // Re-attach: if an operation is currently in progress, push current state
+        // so the webview can jump to the progress view instead of showing Welcome.
+        const status = this.service.status;
+        if (status === 'running' || status === 'planning') {
+            const phases = this.service.phases;
+            if (phases.length > 0) {
+                this.sendMessage({ type: 'phaseUpdate', phases });
+            }
+            this.sendMessage({ type: 'statusChange', status });
+
+            // Replay buffered log entries
+            for (const entry of this.service.logBuffer) {
+                this.sendMessage({
+                    type: 'logEntry',
+                    level: entry.Level,
+                    message: entry.Message,
+                    timestamp: entry.Timestamp,
+                });
+            }
+
+            // Tell webview to jump to progress step
+            this.sendMessage({ type: 'reattach', status });
+        }
     }
 
     private async handleBrowseDirectory(): Promise<void> {
@@ -225,8 +288,10 @@ export class InstallerWizardPanel {
                 type: 'versionsLoaded',
                 versions: versions.map(v => ({
                     Tag: v.Tag,
+                    Name: v.Name ?? v.Tag,
                     ReleaseDate: v.ReleaseDate?.toISOString() ?? null,
                     Prerelease: v.Prerelease,
+                    Notes: v.Notes ?? null,
                 })),
             });
         } catch {
@@ -256,6 +321,9 @@ export class InstallerWizardPanel {
         planInput: CreatePlanInput,
         options: RunOptions
     ): Promise<void> {
+        if (this.service.status === 'running' || this.service.status === 'planning') {
+            return; // Ignore duplicate start requests
+        }
         try {
             const result = await this.service.install(planInput, options);
             this.sendMessage({
@@ -279,10 +347,31 @@ export class InstallerWizardPanel {
     }
 
     private async handleStartDoctor(targetDir: string): Promise<void> {
-        await this.service.doctor(targetDir);
+        if (this.service.status === 'running' || this.service.status === 'planning') {
+            return;
+        }
+        try {
+            const result = await this.service.doctor(targetDir);
+            if (result) {
+                this.sendMessage({
+                    type: 'doctorComplete',
+                    hasFailures: result.HasFailures,
+                    passCount: result.PassCount,
+                    warnCount: result.WarnCount,
+                    failCount: result.FailCount,
+                    environment: result.Environment,
+                    lastInstall: result.LastInstall,
+                });
+            }
+        } catch {
+            this.sendMessage({ type: 'statusChange', status: 'failed' });
+        }
     }
 
     private async handleStartResume(targetDir: string): Promise<void> {
+        if (this.service.status === 'running' || this.service.status === 'planning') {
+            return;
+        }
         try {
             const result = await this.service.resume(targetDir);
             this.sendMessage({
@@ -301,6 +390,69 @@ export class InstallerWizardPanel {
                 warnings: [],
                 phasesCompleted: [],
                 phasesFailed: ['unknown'],
+            });
+        }
+    }
+
+    /** Load install checkpoint data for the given directory and send it to the webview. */
+    private async handleCheckState(targetDir: string): Promise<void> {
+        try {
+            const stateData = await this.service.checkInstallState(targetDir);
+            this.sendMessage({ type: 'stateLoaded', state: stateData });
+        } catch {
+            this.sendMessage({ type: 'stateLoaded', state: null });
+        }
+    }
+
+    /** Prompt user for a JSON config file and send the parsed config to the webview. */
+    private async handleLoadConfig(): Promise<void> {
+        const files = await vscode.window.showOpenDialog({
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: false,
+            filters: { 'JSON Files': ['json'] },
+            title: 'Load Install Configuration',
+        });
+        if (!files || files.length === 0) return;
+
+        try {
+            const config = await this.service.loadConfigFromFile(files[0].fsPath);
+            this.sendMessage({ type: 'configLoaded', config });
+        } catch {
+            vscode.window.showErrorMessage('Failed to load config file.');
+        }
+    }
+
+    /** Prompt user for a save location and write the install config as JSON. */
+    private async handleSaveConfig(config: Record<string, unknown>): Promise<void> {
+        const uri = await vscode.window.showSaveDialog({
+            defaultUri: vscode.Uri.file('mj-install-config.json'),
+            filters: { 'JSON Files': ['json'] },
+            title: 'Save Install Configuration',
+        });
+        if (!uri) return;
+
+        try {
+            const json = JSON.stringify(config, null, 2);
+            fs.writeFileSync(uri.fsPath, json, 'utf-8');
+            vscode.window.showInformationMessage(`Config saved to ${uri.fsPath}`);
+        } catch {
+            vscode.window.showErrorMessage('Failed to save config file.');
+        }
+    }
+
+    /** Create a plan without executing it and send the summary back to the webview. */
+    private async handleDryRun(planInput: CreatePlanInput): Promise<void> {
+        try {
+            const result = await this.service.createPlan(planInput);
+            this.sendMessage({
+                type: 'planSummary',
+                summary: result?.summary ?? 'No plan summary available.',
+            });
+        } catch {
+            this.sendMessage({
+                type: 'planSummary',
+                summary: 'Failed to create plan preview.',
             });
         }
     }
@@ -972,6 +1124,24 @@ export class InstallerWizardPanel {
         .log-line.error { color: var(--vscode-terminal-ansiRed, #e06c75); }
         .log-line.verbose { color: var(--vscode-descriptionForeground); }
 
+        .log-filter-btn {
+            padding: 2px 8px;
+            font-size: 11px;
+            border: 1px solid var(--vscode-button-secondaryBorder, var(--vscode-panel-border));
+            background: transparent;
+            color: var(--vscode-foreground);
+            border-radius: 3px;
+            cursor: pointer;
+            opacity: 0.7;
+        }
+        .log-filter-btn.active {
+            opacity: 1;
+            background: var(--vscode-button-secondaryBackground);
+        }
+        .log-filter-btn:hover {
+            opacity: 1;
+        }
+
         /* Completion Banners */
         .completion-banner {
             padding: 20px;
@@ -1044,6 +1214,11 @@ export class InstallerWizardPanel {
         .wizard-footer .footer-right {
             display: flex;
             gap: 8px;
+        }
+
+        .wizard-footer .footer-center {
+            flex: 1;
+            text-align: center;
         }
 
         /* ================================================================
@@ -1166,7 +1341,7 @@ export class InstallerWizardPanel {
                 <div class="form-group" id="versionGroup">
                     <label>Version</label>
                     <div style="display: flex; gap: 8px; align-items: center;">
-                        <select id="versionSelect" style="flex: 1;">
+                        <select id="versionSelect" style="flex: 1;" onchange="showVersionNotes()">
                             <option value="">-- Select a version --</option>
                         </select>
                         <button class="btn-secondary" onclick="fetchVersions()" id="fetchVersionsBtn">
@@ -1185,6 +1360,11 @@ export class InstallerWizardPanel {
             <div class="step-panel" id="step-3" data-step="3">
                 <div class="step-title">Database Configuration</div>
                 <div class="step-description">Configure your SQL Server connection.</div>
+                <div style="margin-bottom: 12px;">
+                    <button class="btn-secondary" onclick="vscode.postMessage({type:'loadConfig'})" title="Load settings from a saved JSON config file">
+                        Load Config File
+                    </button>
+                </div>
 
                 <div class="form-row">
                     <div class="form-group">
@@ -1194,6 +1374,7 @@ export class InstallerWizardPanel {
                     <div class="form-group" style="max-width: 120px;">
                         <label>Port</label>
                         <input type="number" id="dbPort" value="1433" />
+                        <div class="field-error hidden" id="dbPortError"></div>
                     </div>
                 </div>
 
@@ -1257,11 +1438,13 @@ export class InstallerWizardPanel {
                         <label>API Port</label>
                         <input type="number" id="apiPort" value="4000" />
                         <div class="field-hint">Port for MJAPI GraphQL server</div>
+                        <div class="field-error hidden" id="apiPortError"></div>
                     </div>
                     <div class="form-group">
                         <label>Explorer Port</label>
                         <input type="number" id="explorerPort" value="4200" />
                         <div class="field-hint">Port for MJExplorer Angular dev server</div>
+                        <div class="field-error hidden" id="explorerPortError"></div>
                     </div>
                 </div>
 
@@ -1281,10 +1464,12 @@ export class InstallerWizardPanel {
                     <div class="form-group">
                         <label>Tenant ID</label>
                         <input type="text" id="entraTenantId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                        <div class="field-error hidden" id="entraTenantIdError"></div>
                     </div>
                     <div class="form-group">
                         <label>Client ID</label>
                         <input type="text" id="entraClientId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+                        <div class="field-error hidden" id="entraClientIdError"></div>
                     </div>
                 </div>
 
@@ -1293,6 +1478,7 @@ export class InstallerWizardPanel {
                     <div class="form-group">
                         <label>Domain</label>
                         <input type="text" id="auth0Domain" placeholder="your-tenant.auth0.com" />
+                        <div class="field-error hidden" id="auth0DomainError"></div>
                     </div>
                     <div class="form-group">
                         <label>Client ID</label>
@@ -1357,6 +1543,7 @@ export class InstallerWizardPanel {
                             <div class="form-group">
                                 <label>Email</label>
                                 <input type="text" id="newUserEmail" placeholder="user@example.com" />
+                                <div class="field-error hidden" id="newUserEmailError"></div>
                             </div>
                             <div class="form-group">
                                 <label>Username <span class="optional">(defaults to email)</span></label>
@@ -1411,10 +1598,13 @@ export class InstallerWizardPanel {
                 <div class="step-title">Review Configuration</div>
                 <div class="step-description">Review your settings before starting the installation.</div>
                 <div id="reviewContent"></div>
-                <div class="mt-16" style="text-align: center;">
+                <div id="planSummaryArea" class="hidden" style="margin-top:12px;padding:12px;border-radius:6px;background:var(--vscode-textBlockQuote-background);white-space:pre-wrap;font-size:12px;max-height:200px;overflow-y:auto;"></div>
+                <div class="mt-16" style="text-align: center; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
                     <button class="btn-primary" style="padding: 10px 40px; font-size: 15px;" onclick="startInstall()">
                         Start Installation
                     </button>
+                    <button class="btn-secondary" onclick="previewPlan()">Preview Plan</button>
+                    <button class="btn-secondary" onclick="saveConfig()">Save Config</button>
                 </div>
             </div>
 
@@ -1432,9 +1622,15 @@ export class InstallerWizardPanel {
                 <div id="logSection">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <label style="margin-bottom: 0;">Output Log</label>
-                        <button class="btn-icon" onclick="vscode.postMessage({type:'showLog'})" title="Open full log">
-                            Open Full Log
-                        </button>
+                        <div style="display: flex; gap: 4px; align-items: center;">
+                            <button class="log-filter-btn active" data-filter="all" onclick="setLogFilter('all')">All</button>
+                            <button class="log-filter-btn" data-filter="info" onclick="setLogFilter('info')">Info</button>
+                            <button class="log-filter-btn" data-filter="warn" onclick="setLogFilter('warn')">Warn</button>
+                            <button class="log-filter-btn" data-filter="error" onclick="setLogFilter('error')">Error</button>
+                            <button class="btn-icon" onclick="vscode.postMessage({type:'showLog'})" title="Open full log" style="margin-left: 8px;">
+                                Open Full Log
+                            </button>
+                        </div>
                     </div>
                     <div class="log-area" id="logArea"></div>
                 </div>
@@ -1454,6 +1650,9 @@ export class InstallerWizardPanel {
     <div class="wizard-footer">
         <div class="footer-left">
             <button class="btn-secondary" id="backBtn" onclick="goBack()" disabled>Back</button>
+        </div>
+        <div class="footer-center">
+            <span id="stepCounter" style="font-size:12px;opacity:0.7;"></span>
         </div>
         <div class="footer-right">
             <button class="btn-secondary hidden" id="cancelBtn" onclick="cancelInstall()">Cancel</button>
@@ -1500,6 +1699,101 @@ export class InstallerWizardPanel {
         let logLines = [];
         let logAutoScroll = true;
         let phases = [];
+
+        // ================================================================
+        // State persistence (survives panel close/reopen)
+        // ================================================================
+        function saveState() {
+            // Persist form data but EXCLUDE passwords and secrets for security
+            vscode.setState({
+                wizardMode,
+                currentStep: isRunning ? 7 : currentStep,
+                completedSteps: Array.from(completedSteps),
+                formData: {
+                    targetDir: getVal('targetDir'),
+                    dbHost: getVal('dbHost'),
+                    dbPort: getVal('dbPort'),
+                    dbName: getVal('dbName'),
+                    dbTrustCert: getChecked('dbTrustCert'),
+                    codegenUser: getVal('codegenUser'),
+                    apiUser: getVal('apiUser'),
+                    apiPort: getVal('apiPort'),
+                    explorerPort: getVal('explorerPort'),
+                    authProvider: getVal('authProvider'),
+                    entraTenantId: getVal('entraTenantId'),
+                    entraClientId: getVal('entraClientId'),
+                    auth0Domain: getVal('auth0Domain'),
+                    auth0ClientId: getVal('auth0ClientId'),
+                    includePrerelease: getChecked('includePrerelease'),
+                    flagSkipDB: getChecked('flagSkipDB'),
+                    flagSkipCodeGen: getChecked('flagSkipCodeGen'),
+                    flagSkipStart: getChecked('flagSkipStart'),
+                    flagFast: getChecked('flagFast'),
+                    flagNoResume: getChecked('flagNoResume'),
+                    flagVerbose: getChecked('flagVerbose'),
+                },
+            });
+        }
+
+        function getVal(id) {
+            const el = document.getElementById(id);
+            return el ? el.value : '';
+        }
+
+        function getChecked(id) {
+            const el = document.getElementById(id);
+            return el ? el.checked : false;
+        }
+
+        function restoreState() {
+            const state = vscode.getState();
+            if (!state || !state.formData) return false;
+
+            wizardMode = state.wizardMode || 'install';
+            completedSteps = new Set(state.completedSteps || []);
+
+            const fd = state.formData;
+            setVal('targetDir', fd.targetDir);
+            setVal('dbHost', fd.dbHost);
+            setVal('dbPort', fd.dbPort);
+            setVal('dbName', fd.dbName);
+            setCheck('dbTrustCert', fd.dbTrustCert);
+            setVal('codegenUser', fd.codegenUser);
+            setVal('apiUser', fd.apiUser);
+            setVal('apiPort', fd.apiPort);
+            setVal('explorerPort', fd.explorerPort);
+            setVal('authProvider', fd.authProvider);
+            setVal('entraTenantId', fd.entraTenantId);
+            setVal('entraClientId', fd.entraClientId);
+            setVal('auth0Domain', fd.auth0Domain);
+            setVal('auth0ClientId', fd.auth0ClientId);
+            setCheck('includePrerelease', fd.includePrerelease);
+            setCheck('flagSkipDB', fd.flagSkipDB);
+            setCheck('flagSkipCodeGen', fd.flagSkipCodeGen);
+            setCheck('flagSkipStart', fd.flagSkipStart);
+            setCheck('flagFast', fd.flagFast);
+            setCheck('flagNoResume', fd.flagNoResume);
+            setCheck('flagVerbose', fd.flagVerbose);
+
+            selectMode(wizardMode);
+            updateAuthFields();
+
+            // Navigate to saved step (but not to progress step — that's handled by reattach)
+            if (state.currentStep && state.currentStep > 1 && state.currentStep < 7) {
+                goToStep(state.currentStep);
+            }
+            return true;
+        }
+
+        function setVal(id, val) {
+            const el = document.getElementById(id);
+            if (el && val != null) el.value = val;
+        }
+
+        function setCheck(id, val) {
+            const el = document.getElementById(id);
+            if (el && val != null) el.checked = !!val;
+        }
 
         // ================================================================
         // Step definitions per mode
@@ -1585,6 +1879,9 @@ export class InstallerWizardPanel {
 
             // Pre-render step 6 review when navigating to it
             if (step === 6) renderReview();
+
+            // Persist state on every step change
+            saveState();
         }
 
         function goNext() {
@@ -1623,11 +1920,21 @@ export class InstallerWizardPanel {
             const backBtn = document.getElementById('backBtn');
             const nextBtn = document.getElementById('nextBtn');
             const cancelBtn = document.getElementById('cancelBtn');
+            const stepCounter = document.getElementById('stepCounter');
 
             const prev = getPrevStep();
             const next = getNextStep();
 
             backBtn.disabled = !prev || isRunning;
+
+            // Step counter
+            const steps = getStepNumbers();
+            const idx = steps.indexOf(currentStep);
+            if (idx >= 0 && currentStep !== 7) {
+                stepCounter.textContent = 'Step ' + (idx + 1) + ' of ' + steps.length;
+            } else {
+                stepCounter.textContent = '';
+            }
 
             if (isRunning) {
                 nextBtn.classList.add('hidden');
@@ -1680,9 +1987,55 @@ export class InstallerWizardPanel {
             }
 
             if (step === 3) {
+                let valid = true;
                 const dbName = document.getElementById('dbName').value.trim();
                 if (!dbName) {
                     showError('dbNameError', 'Database name is required.');
+                    valid = false;
+                }
+                const dbPort = parseInt(document.getElementById('dbPort').value);
+                if (isNaN(dbPort) || dbPort < 1 || dbPort > 65535) {
+                    showError('dbPortError', 'Port must be 1-65535.');
+                    valid = false;
+                }
+                return valid;
+            }
+
+            if (step === 4) {
+                let valid = true;
+                const apiPort = parseInt(document.getElementById('apiPort').value);
+                if (isNaN(apiPort) || apiPort < 1 || apiPort > 65535) {
+                    showError('apiPortError', 'Port must be 1-65535.');
+                    valid = false;
+                }
+                const explorerPort = parseInt(document.getElementById('explorerPort').value);
+                if (isNaN(explorerPort) || explorerPort < 1 || explorerPort > 65535) {
+                    showError('explorerPortError', 'Port must be 1-65535.');
+                    valid = false;
+                }
+                const authProvider = document.getElementById('authProvider').value;
+                if (authProvider === 'entra') {
+                    if (!document.getElementById('entraTenantId').value.trim()) {
+                        showError('entraTenantIdError', 'Tenant ID is required for Entra.');
+                        valid = false;
+                    }
+                    if (!document.getElementById('entraClientId').value.trim()) {
+                        showError('entraClientIdError', 'Client ID is required for Entra.');
+                        valid = false;
+                    }
+                } else if (authProvider === 'auth0') {
+                    if (!document.getElementById('auth0Domain').value.trim()) {
+                        showError('auth0DomainError', 'Domain is required for Auth0.');
+                        valid = false;
+                    }
+                }
+                return valid;
+            }
+
+            if (step === 5) {
+                const email = document.getElementById('newUserEmail').value.trim();
+                if (email && !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
+                    showError('newUserEmailError', 'Please enter a valid email address.');
                     return false;
                 }
                 return true;
@@ -1728,6 +2081,7 @@ export class InstallerWizardPanel {
 
             renderSidebar();
             updateFooter();
+            saveState();
         }
 
         // ================================================================
@@ -1767,17 +2121,22 @@ export class InstallerWizardPanel {
             vscode.postMessage({ type: 'fetchVersions', includePrerelease: prerelease });
         }
 
+        let versionNotes = {};
+
         function populateVersions(versions) {
             const select = document.getElementById('versionSelect');
             const current = select.value;
+            versionNotes = {};
 
             select.innerHTML = '<option value="">-- Select a version --</option>';
             for (const v of versions) {
                 const opt = document.createElement('option');
                 opt.value = v.Tag;
-                opt.textContent = v.Tag + (v.Prerelease ? ' (pre-release)' : '') +
+                const displayName = v.Name && v.Name !== v.Tag ? v.Name + ' (' + v.Tag + ')' : v.Tag;
+                opt.textContent = displayName + (v.Prerelease ? ' [pre-release]' : '') +
                     (v.ReleaseDate ? ' - ' + new Date(v.ReleaseDate).toLocaleDateString() : '');
                 select.appendChild(opt);
+                if (v.Notes) versionNotes[v.Tag] = v.Notes;
             }
 
             // Restore selection or default to first
@@ -1790,6 +2149,28 @@ export class InstallerWizardPanel {
             const btn = document.getElementById('fetchVersionsBtn');
             btn.disabled = false;
             btn.textContent = 'Refresh';
+
+            showVersionNotes();
+        }
+
+        function showVersionNotes() {
+            let notesEl = document.getElementById('versionNotes');
+            if (!notesEl) {
+                notesEl = document.createElement('div');
+                notesEl.id = 'versionNotes';
+                notesEl.style.cssText = 'margin-top:8px;padding:8px;border-radius:4px;font-size:12px;' +
+                    'background:var(--vscode-textBlockQuote-background);white-space:pre-wrap;max-height:120px;overflow-y:auto;';
+                const versionGroup = document.getElementById('versionGroup');
+                if (versionGroup) versionGroup.appendChild(notesEl);
+            }
+            const tag = document.getElementById('versionSelect').value;
+            const notes = versionNotes[tag];
+            if (notes) {
+                notesEl.textContent = notes;
+                notesEl.style.display = 'block';
+            } else {
+                notesEl.style.display = 'none';
+            }
         }
 
         // ================================================================
@@ -1984,6 +2365,7 @@ export class InstallerWizardPanel {
         // Start operations
         // ================================================================
         function startInstall() {
+            if (isRunning) return;
             const config = buildConfig();
             const flags = getFlags();
             const targetDir = document.getElementById('targetDir').value.trim();
@@ -2023,6 +2405,7 @@ export class InstallerWizardPanel {
         }
 
         function startDoctor() {
+            if (isRunning) return;
             const targetDir = document.getElementById('targetDir').value.trim();
             if (!targetDir) return;
 
@@ -2041,6 +2424,7 @@ export class InstallerWizardPanel {
         }
 
         function startResume() {
+            if (isRunning) return;
             const targetDir = document.getElementById('targetDir').value.trim();
             if (!targetDir) return;
 
@@ -2064,10 +2448,47 @@ export class InstallerWizardPanel {
             vscode.postMessage({ type: 'cancelInstall' });
         }
 
+        function previewPlan() {
+            const config = buildConfig();
+            const flags = getFlags();
+            const targetDir = document.getElementById('targetDir').value.trim();
+            const version = document.getElementById('versionSelect').value;
+
+            vscode.postMessage({
+                type: 'dryRun',
+                planInput: {
+                    Dir: targetDir,
+                    Tag: version,
+                    Config: config,
+                    SkipDB: flags.SkipDB,
+                    SkipCodeGen: flags.SkipCodeGen,
+                    SkipStart: flags.SkipStart,
+                    Fast: flags.Fast,
+                },
+            });
+        }
+
+        function saveConfig() {
+            const config = buildConfig();
+            const flags = getFlags();
+            config.Dir = document.getElementById('targetDir').value.trim();
+            config.Tag = document.getElementById('versionSelect').value;
+            config.Flags = flags;
+            vscode.postMessage({ type: 'saveConfig', config });
+        }
+
+        function showPlanSummary(summary) {
+            const area = document.getElementById('planSummaryArea');
+            if (!area) return;
+            area.textContent = summary;
+            area.classList.remove('hidden');
+        }
+
         // ================================================================
         // Phase timeline rendering
         // ================================================================
-        const PHASE_LABELS = {
+        // Default labels — overridden by phaseLabels from init message
+        let PHASE_LABELS = {
             preflight: 'Preflight Checks',
             scaffold: 'Scaffold Project',
             configure: 'Configure Settings',
@@ -2079,9 +2500,23 @@ export class InstallerWizardPanel {
             smoke_test: 'Smoke Test',
         };
 
+        // Elapsed time tracking for running phases
+        let phaseStartTime = null;
+        let elapsedTimerHandle = null;
+
         function renderPhaseTimeline(phaseData) {
             phases = phaseData;
             const container = document.getElementById('phaseTimeline');
+
+            // Track elapsed time for running phase
+            const runningPhase = phaseData.find(p => p.Status === 'running');
+            if (runningPhase && !phaseStartTime) {
+                phaseStartTime = Date.now();
+                startElapsedTimer();
+            } else if (!runningPhase) {
+                stopElapsedTimer();
+                phaseStartTime = null;
+            }
 
             container.innerHTML = phaseData.map(p => {
                 const label = PHASE_LABELS[p.Phase] || p.Phase;
@@ -2106,10 +2541,19 @@ export class InstallerWizardPanel {
 
                 let errorHtml = '';
                 if (p.ErrorMessage) {
-                    errorHtml = '<div class="phase-error">' + escapeHtml(p.ErrorMessage) + '</div>';
+                    errorHtml = '<div class="phase-error">';
+                    if (p.ErrorCode) {
+                        errorHtml += '<strong>[' + escapeHtml(p.ErrorCode) + ']</strong> ';
+                    }
+                    errorHtml += escapeHtml(p.ErrorMessage);
+                    if (p.SuggestedFix) {
+                        errorHtml += '<div style="margin-top:4px;color:var(--vscode-textLink-foreground);">' +
+                            'Fix: ' + escapeHtml(p.SuggestedFix) + '</div>';
+                    }
+                    errorHtml += '</div>';
                 }
 
-                return '<div class="phase-item">' +
+                return '<div class="phase-item" data-phase="' + p.Phase + '">' +
                     '<div class="phase-icon ' + iconClass + '">' + iconContent + '</div>' +
                     '<div class="phase-details">' +
                         '<div class="phase-name">' + escapeHtml(label) + '</div>' +
@@ -2121,16 +2565,73 @@ export class InstallerWizardPanel {
             }).join('');
         }
 
+        function updatePhaseProgress(phase, message, percent) {
+            const item = document.querySelector('.phase-item[data-phase="' + phase + '"]');
+            if (!item) return;
+            let progressEl = item.querySelector('.phase-progress-msg');
+            if (!progressEl) {
+                progressEl = document.createElement('div');
+                progressEl.className = 'phase-progress-msg';
+                item.querySelector('.phase-details').appendChild(progressEl);
+            }
+            const pctText = percent != null ? ' (' + percent + '%)' : '';
+            progressEl.textContent = message + pctText;
+        }
+
+        function startElapsedTimer() {
+            stopElapsedTimer();
+            elapsedTimerHandle = setInterval(function() {
+                if (!phaseStartTime) return;
+                const elapsed = Date.now() - phaseStartTime;
+                const el = document.querySelector('.phase-icon.running');
+                if (el) {
+                    const item = el.closest('.phase-item');
+                    if (item) {
+                        let timerEl = item.querySelector('.phase-elapsed');
+                        if (!timerEl) {
+                            timerEl = document.createElement('div');
+                            timerEl.className = 'phase-duration phase-elapsed';
+                            item.appendChild(timerEl);
+                        }
+                        timerEl.textContent = formatDuration(elapsed);
+                    }
+                }
+            }, 1000);
+        }
+
+        function stopElapsedTimer() {
+            if (elapsedTimerHandle) {
+                clearInterval(elapsedTimerHandle);
+                elapsedTimerHandle = null;
+            }
+        }
+
         // ================================================================
         // Log output
         // ================================================================
+        let logFilter = 'all';
+
+        function formatTime() {
+            const d = new Date();
+            return d.getHours().toString().padStart(2, '0') + ':' +
+                   d.getMinutes().toString().padStart(2, '0') + ':' +
+                   d.getSeconds().toString().padStart(2, '0');
+        }
+
         function appendLog(level, message) {
             logLines.push({ level, message });
 
             const logArea = document.getElementById('logArea');
             const line = document.createElement('div');
             line.className = 'log-line ' + level;
-            line.textContent = message;
+            line.setAttribute('data-level', level);
+            line.textContent = '[' + formatTime() + '] ' + message;
+
+            // Apply current filter
+            if (logFilter !== 'all' && level !== logFilter) {
+                line.style.display = 'none';
+            }
+
             logArea.appendChild(line);
 
             // Keep only last 500 lines in DOM
@@ -2142,6 +2643,20 @@ export class InstallerWizardPanel {
             if (logAutoScroll) {
                 logArea.scrollTop = logArea.scrollHeight;
             }
+        }
+
+        function setLogFilter(filter) {
+            logFilter = filter;
+            document.querySelectorAll('.log-filter-btn').forEach(function(btn) {
+                btn.classList.toggle('active', btn.getAttribute('data-filter') === filter);
+            });
+            document.querySelectorAll('#logArea .log-line').forEach(function(line) {
+                if (filter === 'all') {
+                    line.style.display = '';
+                } else {
+                    line.style.display = line.getAttribute('data-level') === filter ? '' : 'none';
+                }
+            });
         }
 
         // Detect manual scroll
@@ -2201,7 +2716,9 @@ export class InstallerWizardPanel {
                         ? '<p style="color:var(--vscode-terminal-ansiYellow);">' + data.warnings.length + ' warning(s) during install.</p>'
                         : '') +
                     '<div class="btn-row">' +
+                        '<button class="btn-primary" onclick="openInstallFolder()">Open in VS Code</button>' +
                         '<button class="btn-secondary" onclick="vscode.postMessage({type:\\'showLog\\'})">Show Full Log</button>' +
+                        '<button class="btn-secondary" onclick="startOver()">Start Over</button>' +
                     '</div>';
             } else {
                 const failed = (data.phasesFailed || []).join(', ') || 'Unknown';
@@ -2210,7 +2727,9 @@ export class InstallerWizardPanel {
                     '<h2>&#10007; Installation Failed</h2>' +
                     '<p>Failed at phase: ' + escapeHtml(failed) + '</p>' +
                     '<div class="btn-row">' +
+                        '<button class="btn-primary" onclick="startResume()">Resume Install</button>' +
                         '<button class="btn-secondary" onclick="vscode.postMessage({type:\\'showLog\\'})">Show Full Log</button>' +
+                        '<button class="btn-secondary" onclick="startOver()">Start Over</button>' +
                     '</div>';
             }
 
@@ -2218,10 +2737,135 @@ export class InstallerWizardPanel {
                 data.success ? 'Installation completed.' : 'Installation failed.';
         }
 
-        function showDoctorCompletion() {
+        function showDoctorCompletion(data) {
             isRunning = false;
             updateFooter();
             document.getElementById('progressSubtitle').textContent = 'Diagnostics complete.';
+
+            if (data && data.passCount != null) {
+                const banner = document.getElementById('completionBanner');
+                banner.classList.remove('hidden');
+                const hasFailures = data.hasFailures;
+                banner.className = 'completion-banner ' + (hasFailures ? 'failure' : 'success');
+
+                let envHtml = '';
+                if (data.environment) {
+                    const env = data.environment;
+                    envHtml = '<div style="margin-top:8px;font-size:12px;opacity:0.85;">' +
+                        '<strong>Environment:</strong> ' + escapeHtml(env.OS || 'Unknown') +
+                        ' | Node ' + escapeHtml(env.NodeVersion || '?') +
+                        ' | npm ' + escapeHtml(env.NpmVersion || '?') +
+                        ' | ' + escapeHtml(env.Architecture || '') +
+                        '</div>';
+                }
+
+                let lastInstallHtml = '';
+                if (data.lastInstall) {
+                    lastInstallHtml = '<div style="margin-top:4px;font-size:12px;opacity:0.85;">' +
+                        '<strong>Last Install:</strong> ' + escapeHtml(data.lastInstall.Tag || '?') +
+                        ' on ' + escapeHtml(data.lastInstall.Timestamp || '?') +
+                        '</div>';
+                }
+
+                banner.innerHTML =
+                    '<h2>' + (hasFailures ? '&#10007; Issues Found' : '&#10003; All Checks Passed') + '</h2>' +
+                    '<p>' + data.passCount + ' passed, ' + data.warnCount + ' warnings, ' + data.failCount + ' failed</p>' +
+                    envHtml + lastInstallHtml +
+                    '<div class="btn-row" style="margin-top:12px;">' +
+                        '<button class="btn-secondary" onclick="vscode.postMessage({type:\\'showLog\\'})">Show Full Log</button>' +
+                        '<button class="btn-secondary" onclick="startOver()">Start Over</button>' +
+                    '</div>';
+            }
+        }
+
+        function showResumeStatePreview(state) {
+            let previewEl = document.getElementById('resumeStatePreview');
+            if (!previewEl) {
+                previewEl = document.createElement('div');
+                previewEl.id = 'resumeStatePreview';
+                previewEl.style.cssText = 'margin-top:12px;padding:12px;border-radius:6px;font-size:13px;' +
+                    'background:var(--vscode-textBlockQuote-background);';
+                const dirInput = document.getElementById('targetDir');
+                if (dirInput && dirInput.parentElement && dirInput.parentElement.parentElement) {
+                    dirInput.parentElement.parentElement.appendChild(previewEl);
+                }
+            }
+
+            if (!state) {
+                previewEl.innerHTML = '<span style="opacity:0.7;">No previous install checkpoint found in this directory.</span>';
+                return;
+            }
+
+            const tag = state.VersionTag || state.Tag || 'Unknown';
+            const started = state.StartedAt ? new Date(state.StartedAt).toLocaleString() : 'Unknown';
+            const phases = state.Phases || {};
+            const completed = [];
+            const failed = [];
+            const pending = [];
+            for (const key in phases) {
+                const s = phases[key];
+                if (s === 'completed') completed.push(key);
+                else if (s === 'failed') failed.push(key);
+                else pending.push(key);
+            }
+
+            previewEl.innerHTML =
+                '<strong>Previous install checkpoint found</strong><br/>' +
+                'Version: <strong>' + escapeHtml(tag) + '</strong> | Started: ' + escapeHtml(started) + '<br/>' +
+                (completed.length ? 'Completed: ' + completed.map(p => PHASE_LABELS[p] || p).join(', ') + '<br/>' : '') +
+                (failed.length ? '<span style="color:var(--vscode-terminal-ansiRed);">Failed: ' + failed.map(p => PHASE_LABELS[p] || p).join(', ') + '</span><br/>' : '') +
+                (pending.length ? 'Will resume from: <strong>' + (PHASE_LABELS[pending[0]] || pending[0]) + '</strong>' : '');
+        }
+
+        function applyLoadedConfig(config) {
+            if (!config) return;
+
+            // Map config fields to form fields
+            const fieldMap = {
+                Dir: 'targetDir',
+                Tag: 'versionSelect',
+                SqlHost: 'dbHost',
+                SqlPort: 'dbPort',
+                SqlDatabase: 'dbDatabase',
+                SqlUser: 'dbUser',
+                EnableGraphQL: 'enableGraphQL',
+                EnableExplorer: 'enableExplorer',
+                GraphQLPort: 'apiPort',
+                ExplorerPort: 'explorerPort',
+                AuthProvider: 'authProvider',
+                CreateSampleData: 'createSampleData',
+                RunCodeGen: 'runCodeGen',
+            };
+
+            for (const key in fieldMap) {
+                if (config[key] != null) {
+                    const el = document.getElementById(fieldMap[key]);
+                    if (!el) continue;
+                    if (el.type === 'checkbox') {
+                        el.checked = !!config[key];
+                    } else {
+                        el.value = String(config[key]);
+                    }
+                }
+            }
+
+            vscode.postMessage({ type: 'showInfo', text: 'Configuration loaded.' });
+        }
+
+        function startOver() {
+            isRunning = false;
+            completedSteps = [];
+            const banner = document.getElementById('completionBanner');
+            if (banner) { banner.classList.add('hidden'); banner.innerHTML = ''; }
+            goToStep(1);
+            selectMode(wizardMode);
+        }
+
+        function openInstallFolder() {
+            const dir = document.getElementById('targetDir').value.trim();
+            if (dir) {
+                vscode.postMessage({ type: 'openFolder', path: dir });
+            }
         }
 
         // ================================================================
@@ -2233,7 +2877,17 @@ export class InstallerWizardPanel {
             switch (msg.type) {
                 case 'init':
                     workspaceFolders = msg.workspaceFolders || [];
+                    if (msg.phaseLabels) PHASE_LABELS = msg.phaseLabels;
                     renderWorkspaceShortcuts(workspaceFolders);
+                    // Restore saved form state if available
+                    restoreState();
+                    break;
+
+                case 'reattach':
+                    // Panel was reopened while an install is running — jump to progress
+                    isRunning = true;
+                    goToStep(7);
+                    updateFooter();
                     break;
 
                 case 'setMode':
@@ -2242,6 +2896,10 @@ export class InstallerWizardPanel {
 
                 case 'directorySelected':
                     document.getElementById('targetDir').value = msg.path;
+                    // In resume mode, check for install state when directory is selected
+                    if (wizardMode === 'resume') {
+                        vscode.postMessage({ type: 'checkState', targetDir: msg.path });
+                    }
                     break;
 
                 case 'versionsLoaded':
@@ -2265,12 +2923,9 @@ export class InstallerWizardPanel {
 
                 case 'statusChange':
                     updateStatusBadge(msg.status);
-                    if (msg.status === 'completed' || msg.status === 'failed' || msg.status === 'cancelled') {
-                        if (wizardMode === 'doctor') {
-                            showDoctorCompletion();
-                        }
-                        // Install/resume completion handled by installComplete message
-                    }
+                    // Doctor completion banner is handled by the 'doctorComplete' message.
+                    // Install/resume completion is handled by the 'installComplete' message.
+                    // The statusChange message only updates the badge.
                     break;
 
                 case 'diagnosticUpdate':
@@ -2279,6 +2934,26 @@ export class InstallerWizardPanel {
 
                 case 'installComplete':
                     showCompletion(msg);
+                    break;
+
+                case 'stepProgress':
+                    updatePhaseProgress(msg.phase, msg.message, msg.percent);
+                    break;
+
+                case 'doctorComplete':
+                    showDoctorCompletion(msg);
+                    break;
+
+                case 'stateLoaded':
+                    showResumeStatePreview(msg.state);
+                    break;
+
+                case 'configLoaded':
+                    applyLoadedConfig(msg.config);
+                    break;
+
+                case 'planSummary':
+                    showPlanSummary(msg.summary);
                     break;
             }
         });
@@ -2328,6 +3003,31 @@ export class InstallerWizardPanel {
         }
 
         init();
+
+        // Debounced save on input changes so form data persists across panel close/reopen
+        let saveDebounce = null;
+        document.querySelectorAll('input, select, textarea').forEach(function(el) {
+            el.addEventListener('input', function() {
+                if (saveDebounce) clearTimeout(saveDebounce);
+                saveDebounce = setTimeout(function() { saveState(); }, 500);
+            });
+            el.addEventListener('change', function() {
+                saveState();
+            });
+        });
+
+        // Keyboard navigation: Enter → Next, Escape → Back
+        document.addEventListener('keydown', function(e) {
+            const tag = (e.target || e.srcElement).tagName;
+            if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                goNext();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                goBack();
+            }
+        });
     </script>
 </body>
 </html>`;

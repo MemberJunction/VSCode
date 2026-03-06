@@ -131,11 +131,18 @@ export class InstallerPhaseProvider implements vscode.TreeDataProvider<Installer
         return [];
     }
 
+    /** Build a tree item for a phase, adding error details and suggested fixes as children. */
     private buildPhaseItem(phase: PhaseDisplayState): PhaseTreeItem {
         const children: vscode.TreeItem[] = [];
 
-        if (phase.ErrorMessage) {
+        if (phase.ErrorCode) {
+            children.push(new ErrorDetailItem(`[${phase.ErrorCode}] ${phase.ErrorMessage ?? ''}`));
+        } else if (phase.ErrorMessage) {
             children.push(new ErrorDetailItem(phase.ErrorMessage));
+        }
+
+        if (phase.SuggestedFix) {
+            children.push(new SuggestedFixItem(phase.SuggestedFix));
         }
 
         return new PhaseTreeItem(phase, children);

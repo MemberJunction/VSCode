@@ -56,7 +56,7 @@
         {
           "id": "memberjunction.installerPhases",
           "name": "Installer",
-          "when": "memberjunction.workspaceInitialized"
+          "when": "memberjunction.installerEnabled"
         }
       ]
     },
@@ -64,6 +64,10 @@
       {
         "view": "memberjunction.entityExplorer",
         "contents": "No entities loaded.\n[Connect to Database](command:memberjunction.connect)\n[Connection Help](command:memberjunction.showConnectionHelp)"
+      },
+      {
+        "view": "memberjunction.installerPhases",
+        "contents": "No install activity yet.\n[Install MemberJunction](command:memberjunction.install)\n[Run Doctor](command:memberjunction.installDoctor)"
       }
     ],
     "configuration": {
@@ -346,6 +350,14 @@
       {
         "command": "memberjunction.cancelInstall",
         "title": "MemberJunction: Cancel Install"
+      },
+      {
+        "command": "memberjunction.copyInstallerError",
+        "title": "Copy Error Message"
+      },
+      {
+        "command": "memberjunction.copyInstallerFix",
+        "title": "Copy Suggested Fix"
       }
     ],
     "menus": {
@@ -416,6 +428,16 @@
           "command": "memberjunction.previewMigrationSQL",
           "when": "view == memberjunction.migrationExplorer && viewItem == migration",
           "group": "navigation@1"
+        },
+        {
+          "command": "memberjunction.copyInstallerError",
+          "when": "view == memberjunction.installerPhases && viewItem == installerErrorDetail",
+          "group": "copy@1"
+        },
+        {
+          "command": "memberjunction.copyInstallerFix",
+          "when": "view == memberjunction.installerPhases && viewItem == installerSuggestedFix",
+          "group": "copy@1"
         }
       ]
     }

@@ -46,6 +46,8 @@ export interface PhaseDisplayState {
     Status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
     DurationMs?: number;
     ErrorMessage?: string;
+    ErrorCode?: string;
+    SuggestedFix?: string;
 }
 
 /** Tracks a single diagnostic check result. */
@@ -54,6 +56,16 @@ export interface DiagnosticDisplayState {
     Status: 'pass' | 'fail' | 'warn' | 'info';
     Message: string;
     SuggestedFix?: string;
+}
+
+/** Summary result from doctor diagnostics. */
+export interface DoctorResult {
+    HasFailures: boolean;
+    PassCount: number;
+    WarnCount: number;
+    FailCount: number;
+    Environment: { OS: string; NodeVersion: string; NpmVersion: string; Architecture: string };
+    LastInstall: { Tag: string; Timestamp: string } | null;
 }
 
 /** Human-readable labels for each phase ID. */
@@ -89,6 +101,10 @@ export class InstallerService {
     private _phases: PhaseDisplayState[] = [];
     private _diagnostics: DiagnosticDisplayState[] = [];
 
+    /** Buffered log entries for replaying to a newly opened wizard panel. */
+    private _logBuffer: Array<{ Level: string; Message: string; Timestamp: string }> = [];
+    private static readonly MAX_LOG_BUFFER = 500;
+
     /** Current install target directory — used by the post-platform-phase patch. */
     private _installDir: string | null = null;
 
@@ -97,12 +113,15 @@ export class InstallerService {
     private _onPhaseUpdate = new vscode.EventEmitter<PhaseDisplayState[]>();
     private _onDiagnosticUpdate = new vscode.EventEmitter<DiagnosticDisplayState[]>();
     private _onLogEntry = new vscode.EventEmitter<{ Level: string; Message: string }>();
+    private _onStepProgress = new vscode.EventEmitter<{ Phase: string; Message: string; Percent?: number }>();
 
     public readonly onStatusChange = this._onStatusChange.event;
     public readonly onPhaseUpdate = this._onPhaseUpdate.event;
     public readonly onDiagnosticUpdate = this._onDiagnosticUpdate.event;
     /** Log entries from the engine (info, verbose, warn, error). */
     public readonly onLogEntry = this._onLogEntry.event;
+    /** Step-level progress events (download %, build progress, etc.). */
+    public readonly onStepProgress = this._onStepProgress.event;
 
     private constructor() {}
 
@@ -127,6 +146,16 @@ export class InstallerService {
 
     get diagnostics(): DiagnosticDisplayState[] {
         return [...this._diagnostics];
+    }
+
+    /** Copy of the log buffer — used to replay log entries into a newly opened wizard panel. */
+    get logBuffer(): ReadonlyArray<{ Level: string; Message: string; Timestamp: string }> {
+        return [...this._logBuffer];
+    }
+
+    /** Human-readable phase labels — sent to webview to avoid duplication. */
+    get phaseLabels(): Record<string, string> {
+        return { ...PHASE_LABELS };
     }
 
     // -----------------------------------------------------------------------
@@ -170,6 +199,24 @@ export class InstallerService {
         return engine.ListVersions(includePrerelease);
     }
 
+    /**
+     * Create a plan without executing it (for dry-run / preview).
+     * Returns the plan summary text from engine.Summarize().
+     */
+    async createPlan(input: CreatePlanInput): Promise<{ plan: InstallPlan; summary: string } | null> {
+        try {
+            const engine = await this.createEngine();
+            OutputChannel.info(`Creating plan preview for ${input.Tag ?? 'latest'} in ${input.Dir}...`);
+            const plan = await engine.CreatePlan(input);
+            const summary = plan.Summarize ? plan.Summarize() : 'Plan created.';
+            return { plan, summary };
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            OutputChannel.error(`Plan creation error: ${message}`);
+            return null;
+        }
+    }
+
     /** Run a full install flow: create plan → confirm → execute. */
     async install(input: CreatePlanInput, options: RunOptions): Promise<InstallResult | null> {
         this.resetState();
@@ -208,8 +255,8 @@ export class InstallerService {
         }
     }
 
-    /** Run doctor diagnostics on an existing MJ installation. */
-    async doctor(targetDir: string, options?: DoctorOptions): Promise<void> {
+    /** Run doctor diagnostics on an existing MJ installation. Returns the Diagnostics object. */
+    async doctor(targetDir: string, options?: DoctorOptions): Promise<DoctorResult | null> {
         this._diagnostics = [];
         this._onDiagnosticUpdate.fire(this._diagnostics);
         this.setStatus('running');
@@ -218,7 +265,7 @@ export class InstallerService {
             const engine = await this.createEngine();
 
             OutputChannel.info(`Running doctor diagnostics on ${targetDir}...`);
-            await engine.Doctor(targetDir, options);
+            const diagnostics = await engine.Doctor(targetDir, options);
 
             this.setStatus('completed');
 
@@ -227,10 +274,20 @@ export class InstallerService {
             const warned = this._diagnostics.filter(d => d.Status === 'warn').length;
 
             OutputChannel.info(`Doctor complete: ${passed} passed, ${warned} warnings, ${failed} failed`);
+
+            return {
+                HasFailures: diagnostics.HasFailures,
+                PassCount: passed,
+                WarnCount: warned,
+                FailCount: failed,
+                Environment: diagnostics.Environment,
+                LastInstall: diagnostics.LastInstall ?? null,
+            };
         } catch (err) {
             this.setStatus('failed');
             const message = err instanceof Error ? err.message : String(err);
             OutputChannel.error(`Doctor error: ${message}`);
+            return null;
         }
     }
 
@@ -282,6 +339,34 @@ export class InstallerService {
         return adapter.CheckConnectivity(host, port);
     }
 
+    /**
+     * Check whether a previous install checkpoint exists in the given directory.
+     * Returns the serialized state data (version, started time, per-phase status)
+     * or null if no checkpoint file is found.
+     */
+    async checkInstallState(dir: string): Promise<Record<string, unknown> | null> {
+        if (!this.installerModule) {
+            this.installerModule = await esmImport('@memberjunction/installer');
+        }
+        const exists = await this.installerModule.InstallState.Exists(dir);
+        if (!exists) return null;
+
+        const state = await this.installerModule.InstallState.Load(dir);
+        return state ? JSON.parse(JSON.stringify(state.ToJSON())) as Record<string, unknown> : null;
+    }
+
+    /**
+     * Load an install config from a JSON file on disk.
+     * Uses the engine's `loadConfigFile()` utility.
+     */
+    async loadConfigFromFile(filePath: string): Promise<Record<string, unknown>> {
+        if (!this.installerModule) {
+            this.installerModule = await esmImport('@memberjunction/installer');
+        }
+        const config = await this.installerModule.loadConfigFile(filePath);
+        return JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
+    }
+
     // -----------------------------------------------------------------------
     // Event handlers
     // -----------------------------------------------------------------------
@@ -301,6 +386,8 @@ export class InstallerService {
         phase.DurationMs = e.DurationMs;
         if (e.Error) {
             phase.ErrorMessage = e.Error.message;
+            phase.ErrorCode = (e.Error as { Code?: string }).Code;
+            phase.SuggestedFix = (e.Error as { SuggestedFix?: string }).SuggestedFix;
         }
         this._onPhaseUpdate.fire(this._phases);
 
@@ -329,6 +416,7 @@ export class InstallerService {
     private handleStepProgress(e: StepProgressEvent): void {
         const pct = e.Percent != null ? ` (${e.Percent}%)` : '';
         OutputChannel.info(`  ${e.Message}${pct}`);
+        this._onStepProgress.fire({ Phase: e.Phase, Message: e.Message, Percent: e.Percent });
     }
 
     private handleLog(e: LogEvent): void {
@@ -339,17 +427,21 @@ export class InstallerService {
             OutputChannel.log(`[VERBOSE] ${e.Message}`);
         }
         this._onLogEntry.fire({ Level: e.Level, Message: e.Message });
+        this.bufferLog(e.Level, e.Message);
     }
 
     private handleWarn(e: WarnEvent): void {
         OutputChannel.warn(e.Message);
         vscode.window.showWarningMessage(`MJ Installer: ${e.Message}`);
         this._onLogEntry.fire({ Level: 'warn', Message: e.Message });
+        this.bufferLog('warn', e.Message);
     }
 
     private handleError(e: ErrorEvent): void {
-        OutputChannel.error(`[${e.Phase}] ${e.Error.message}`);
-        this._onLogEntry.fire({ Level: 'error', Message: `[${e.Phase}] ${e.Error.message}` });
+        const msg = `[${e.Phase}] ${e.Error.message}`;
+        OutputChannel.error(msg);
+        this._onLogEntry.fire({ Level: 'error', Message: msg });
+        this.bufferLog('error', msg);
 
         vscode.window.showErrorMessage(
             `MJ Installer Error (${e.Phase}): ${e.Error.message}`,
@@ -443,8 +535,17 @@ export class InstallerService {
     private resetState(): void {
         this._phases = [];
         this._diagnostics = [];
+        this._logBuffer = [];
         this._onPhaseUpdate.fire(this._phases);
         this._onDiagnosticUpdate.fire(this._diagnostics);
+    }
+
+    /** Append a log entry to the replay buffer (capped at MAX_LOG_BUFFER). */
+    private bufferLog(level: string, message: string): void {
+        this._logBuffer.push({ Level: level, Message: message, Timestamp: new Date().toISOString() });
+        if (this._logBuffer.length > InstallerService.MAX_LOG_BUFFER) {
+            this._logBuffer.shift();
+        }
     }
 
     /** Build initial phase display states from the install plan. */
@@ -492,5 +593,6 @@ export class InstallerService {
         this._onPhaseUpdate.dispose();
         this._onDiagnosticUpdate.dispose();
         this._onLogEntry.dispose();
+        this._onStepProgress.dispose();
     }
 }

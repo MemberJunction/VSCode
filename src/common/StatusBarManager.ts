@@ -25,16 +25,17 @@ export class StatusBarManager {
         return item;
     }
 
+    /**
+     * Update a status bar item. Always resets tooltip, command, and backgroundColor
+     * to prevent stale values from a previous state leaking through.
+     */
     public static update(id: string, text: string, tooltip?: string, command?: string): void {
         const item = this.items.get(id);
         if (item) {
             item.text = text;
-            if (tooltip) {
-                item.tooltip = tooltip;
-            }
-            if (command) {
-                item.command = command;
-            }
+            item.tooltip = tooltip ?? '';
+            item.command = command ?? '';
+            item.backgroundColor = undefined;
             item.show();
         }
     }
@@ -72,12 +73,8 @@ export class StatusBarManager {
         const item = this.items.get(id);
         if (item) {
             item.text = text;
-            if (tooltip) {
-                item.tooltip = tooltip;
-            }
-            if (command) {
-                item.command = command;
-            }
+            item.tooltip = tooltip ?? '';
+            item.command = command ?? '';
             item.backgroundColor = backgroundColor;
             item.show();
         }

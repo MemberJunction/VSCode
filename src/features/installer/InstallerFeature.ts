@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { Feature } from '../../types';
-import { InstallerService, InstallerStatus } from '../../services/InstallerService';
+import { InstallerService, InstallerStatus, PhaseDisplayState } from '../../services/InstallerService';
 import { InstallerPhaseProvider } from '../../providers/InstallerPhaseProvider';
 import { InstallerWizardPanel } from '../../providers/InstallerWizardPanel';
 import { StatusBarManager } from '../../common/StatusBarManager';
@@ -23,6 +23,8 @@ export class InstallerFeature implements Feature {
     private phaseProvider: InstallerPhaseProvider | undefined;
     private disposables: vscode.Disposable[] = [];
     private extensionContext: vscode.ExtensionContext | undefined;
+    /** Handle for the delayed status-bar reset timer; cleared on deactivate. */
+    private statusResetTimeout: ReturnType<typeof setTimeout> | undefined;
 
     constructor() {
         this.service = InstallerService.getInstance();
@@ -41,6 +43,10 @@ export class InstallerFeature implements Feature {
 
         OutputChannel.info('Activating Installer feature...');
 
+        // Make the installer sidebar visible — decoupled from workspaceInitialized
+        // so new users who need the installer can see it before connecting.
+        await vscode.commands.executeCommand('setContext', 'memberjunction.installerEnabled', true);
+
         this.extensionContext = context;
         this.registerCommands(context);
         this.registerTreeView(context);
@@ -51,6 +57,10 @@ export class InstallerFeature implements Feature {
     }
 
     async deactivate(): Promise<void> {
+        if (this.statusResetTimeout) {
+            clearTimeout(this.statusResetTimeout);
+            this.statusResetTimeout = undefined;
+        }
         this.phaseProvider?.dispose();
         this.disposables.forEach(d => d.dispose());
         OutputChannel.info('Installer feature deactivated');
@@ -82,6 +92,24 @@ export class InstallerFeature implements Feature {
         context.subscriptions.push(
             vscode.commands.registerCommand('memberjunction.cancelInstall', () => {
                 this.service.cancel();
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('memberjunction.copyInstallerError', (item: vscode.TreeItem) => {
+                if (item.label) {
+                    vscode.env.clipboard.writeText(String(item.label));
+                    vscode.window.showInformationMessage('Error message copied.');
+                }
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('memberjunction.copyInstallerFix', (item: vscode.TreeItem) => {
+                if (item.label) {
+                    vscode.env.clipboard.writeText(String(item.label));
+                    vscode.window.showInformationMessage('Suggested fix copied.');
+                }
             })
         );
     }
@@ -119,6 +147,36 @@ export class InstallerFeature implements Feature {
             this.updateStatusBar(status);
         });
         this.disposables.push(statusListener);
+
+        // Show the current phase name in the status bar during install
+        const phaseListener = this.service.onPhaseUpdate((phases: PhaseDisplayState[]) => {
+            if (this.service.status === 'running') {
+                const runningPhase = phases.find(p => p.Status === 'running');
+                if (runningPhase) {
+                    StatusBarManager.update(
+                        'installer',
+                        '$(sync~spin) MJ Installer: ' + runningPhase.Description,
+                        'Installation in progress — ' + runningPhase.Description + ' — Click to cancel',
+                        'memberjunction.cancelInstall'
+                    );
+                }
+            }
+        });
+        this.disposables.push(phaseListener);
+    }
+
+    /** Schedule an automatic status-bar reset to idle after the given delay. Cancels any pending reset. */
+    private scheduleStatusReset(delayMs: number): void {
+        if (this.statusResetTimeout) {
+            clearTimeout(this.statusResetTimeout);
+        }
+        this.statusResetTimeout = setTimeout(() => {
+            this.statusResetTimeout = undefined;
+            const current = this.service.status;
+            if (current === 'completed' || current === 'cancelled') {
+                this.updateStatusBar('idle');
+            }
+        }, delayMs);
     }
 
     private updateStatusBar(status: InstallerStatus): void {
@@ -154,12 +212,7 @@ export class InstallerFeature implements Feature {
                     'Installation completed successfully',
                     'memberjunction.showInstallLog'
                 );
-                // Reset to idle after a delay
-                setTimeout(() => {
-                    if (this.service.status === 'completed') {
-                        this.updateStatusBar('idle');
-                    }
-                }, 10000);
+                this.scheduleStatusReset(10000);
                 break;
             case 'failed':
                 StatusBarManager.updateWithColor(
@@ -177,11 +230,7 @@ export class InstallerFeature implements Feature {
                     'Installation was cancelled',
                     'memberjunction.install'
                 );
-                setTimeout(() => {
-                    if (this.service.status === 'cancelled') {
-                        this.updateStatusBar('idle');
-                    }
-                }, 5000);
+                this.scheduleStatusReset(5000);
                 break;
         }
     }
