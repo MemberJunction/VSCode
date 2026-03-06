@@ -9,6 +9,7 @@ import { CodeGenFeature } from './features/codegen/CodeGenFeature';
 import { AIAssistanceFeature } from './features/ai-assistance/AIAssistanceFeature';
 import { TestExplorerFeature } from './features/test-explorer/TestExplorerFeature';
 import { MigrationManagerFeature } from './features/migration-manager/MigrationManagerFeature';
+import { InstallerFeature } from './features/installer/InstallerFeature';
 import { OutputChannel } from './common/OutputChannel';
 import { StatusBarManager } from './common/StatusBarManager';
 
@@ -30,7 +31,8 @@ const features: Feature[] = [
     new CodeGenFeature(),
     new AIAssistanceFeature(),
     new TestExplorerFeature(),
-    new MigrationManagerFeature()
+    new MigrationManagerFeature(),
+    new InstallerFeature()
 ];
 
 /**
