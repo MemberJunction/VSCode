@@ -133,7 +133,12 @@
         "memberjunction.aiAssistance.preferredModel": {
           "type": "string",
           "default": "auto",
-          "enum": ["auto", "gpt-4", "claude", "gemini"],
+          "enum": [
+            "auto",
+            "gpt-4",
+            "claude",
+            "gemini"
+          ],
           "description": "Preferred AI model for assistance (requires API keys configured in MJ)"
         },
         "memberjunction.features.testExplorer.enabled": {
@@ -466,7 +471,7 @@
     "@memberjunction/core-entities": "^3.2.0",
     "@memberjunction/global": "^3.2.0",
     "@memberjunction/metadata-sync": "^3.2.0",
-    "@memberjunction/installer": "^5.7.0",
+    "@memberjunction/installer": "^5.11.0",
     "@memberjunction/testing-engine": "^3.2.0",
     "dotenv": "^16.4.5",
     "glob": "^10.3.10"
@@ -477,9 +482,9 @@
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
     "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
     "eslint": "^8.54.0",
-    "typescript": "^5.3.2",
-    "@vscode/vsce": "^2.22.0"
+    "typescript": "^5.3.2"
   },
   "repository": {
     "type": "git",

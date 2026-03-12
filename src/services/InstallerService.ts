@@ -66,6 +66,8 @@ export interface DoctorResult {
     FailCount: number;
     Environment: { OS: string; NodeVersion: string; NpmVersion: string; Architecture: string };
     LastInstall: { Tag: string; Timestamp: string } | null;
+    /** Absolute path to the generated report file (if Report or ReportExtended was requested). */
+    ReportPath: string | null;
 }
 
 /** Human-readable labels for each phase ID. */
@@ -107,6 +109,9 @@ export class InstallerService {
 
     /** Current install target directory — used by the post-platform-phase patch. */
     private _installDir: string | null = null;
+
+    /** Path to the last generated diagnostic report (captured from engine log events). */
+    private _lastReportPath: string | null = null;
 
     // VSCode event emitters
     private _onStatusChange = new vscode.EventEmitter<InstallerStatus>();
@@ -258,6 +263,7 @@ export class InstallerService {
     /** Run doctor diagnostics on an existing MJ installation. Returns the Diagnostics object. */
     async doctor(targetDir: string, options?: DoctorOptions): Promise<DoctorResult | null> {
         this._diagnostics = [];
+        this._lastReportPath = null;
         this._onDiagnosticUpdate.fire(this._diagnostics);
         this.setStatus('running');
 
@@ -282,6 +288,7 @@ export class InstallerService {
                 FailCount: failed,
                 Environment: diagnostics.Environment,
                 LastInstall: diagnostics.LastInstall ?? null,
+                ReportPath: this._lastReportPath,
             };
         } catch (err) {
             this.setStatus('failed');
@@ -428,6 +435,12 @@ export class InstallerService {
         }
         this._onLogEntry.fire({ Level: e.Level, Message: e.Message });
         this.bufferLog(e.Level, e.Message);
+
+        // Capture report path from engine log events
+        const reportPrefix = 'Diagnostic report saved to: ';
+        if (e.Message.startsWith(reportPrefix)) {
+            this._lastReportPath = e.Message.slice(reportPrefix.length).trim();
+        }
     }
 
     private handleWarn(e: WarnEvent): void {
