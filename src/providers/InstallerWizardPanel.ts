@@ -9,6 +9,7 @@ import type {
     RunOptions,
     VersionInfo,
     SqlConnectivityResult,
+    DoctorOptions,
 } from '@memberjunction/installer';
 
 // ---------------------------------------------------------------------------
@@ -193,7 +194,24 @@ export class InstallerWizardPanel {
                 break;
 
             case 'startDoctor':
-                await this.handleStartDoctor(message.targetDir as string);
+                await this.handleStartDoctor(
+                    message.targetDir as string,
+                    message.options as DoctorOptions | undefined
+                );
+                break;
+
+            case 'openReportFile':
+                if (message.path) {
+                    const uri = vscode.Uri.file(message.path as string);
+                    vscode.commands.executeCommand('markdown.showPreview', uri);
+                }
+                break;
+
+            case 'revealReportFile':
+                if (message.path) {
+                    const uri = vscode.Uri.file(message.path as string);
+                    vscode.commands.executeCommand('revealFileInOS', uri);
+                }
                 break;
 
             case 'startResume':
@@ -346,12 +364,15 @@ export class InstallerWizardPanel {
         }
     }
 
-    private async handleStartDoctor(targetDir: string): Promise<void> {
+    private async handleStartDoctor(
+        targetDir: string,
+        options?: DoctorOptions
+    ): Promise<void> {
         if (this.service.status === 'running' || this.service.status === 'planning') {
             return;
         }
         try {
-            const result = await this.service.doctor(targetDir);
+            const result = await this.service.doctor(targetDir, options);
             if (result) {
                 this.sendMessage({
                     type: 'doctorComplete',
@@ -361,6 +382,7 @@ export class InstallerWizardPanel {
                     failCount: result.FailCount,
                     environment: result.Environment,
                     lastInstall: result.LastInstall,
+                    reportPath: result.ReportPath,
                 });
             }
         } catch {
@@ -1338,6 +1360,21 @@ export class InstallerWizardPanel {
                     <div class="field-error hidden" id="targetDirError"></div>
                 </div>
 
+                <!-- Doctor report options (visible only in doctor mode) -->
+                <div class="form-group hidden" id="doctorReportGroup">
+                    <label>Diagnostic Report</label>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="doctorReportBasic" onchange="onReportOptionChange()" />
+                        <label for="doctorReportBasic">Generate diagnostic report</label>
+                    </div>
+                    <div class="field-hint">Creates <code>mj-diagnostic-report.md</code> with environment info, install state, and check results.</div>
+                    <div class="checkbox-group mt-8">
+                        <input type="checkbox" id="doctorReportExtended" onchange="onReportOptionChange()" />
+                        <label for="doctorReportExtended">Extended report (includes config snapshots &amp; service logs)</label>
+                    </div>
+                    <div class="field-hint">Creates <code>mj-diagnostic-report-extended.md</code>. Takes 1-3 minutes extra as it briefly starts MJAPI and Explorer to capture startup output.</div>
+                </div>
+
                 <div class="form-group" id="versionGroup">
                     <label>Version</label>
                     <div style="display: flex; gap: 8px; align-items: center;">
@@ -1531,6 +1568,25 @@ export class InstallerWizardPanel {
                     </div>
                 </div>
 
+                <!-- Encryption Key -->
+                <div class="collapsible" id="encryptionKeySection">
+                    <div class="collapsible-header" onclick="toggleCollapsible('encryptionKeySection')">
+                        <span class="collapsible-chevron">&#9654;</span>
+                        Encryption Key
+                        <span class="optional">(optional)</span>
+                    </div>
+                    <div class="collapsible-body">
+                        <div class="form-group">
+                            <label>Base Encryption Key</label>
+                            <div class="password-wrapper">
+                                <input type="password" id="baseEncryptionKey" placeholder="Base64-encoded 32-byte key" />
+                                <button class="password-toggle" onclick="togglePassword('baseEncryptionKey')">&#128065;</button>
+                            </div>
+                            <div class="field-hint">Used for MJ field-level encryption. If left blank, the installer generates one automatically.</div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- New User -->
                 <div class="collapsible" id="newUserSection">
                     <div class="collapsible-header" onclick="toggleCollapsible('newUserSection')">
@@ -1699,6 +1755,7 @@ export class InstallerWizardPanel {
         let logLines = [];
         let logAutoScroll = true;
         let phases = [];
+        let lastReportPath = null;
 
         // ================================================================
         // State persistence (survives panel close/reopen)
@@ -1731,6 +1788,8 @@ export class InstallerWizardPanel {
                     flagFast: getChecked('flagFast'),
                     flagNoResume: getChecked('flagNoResume'),
                     flagVerbose: getChecked('flagVerbose'),
+                    doctorReportBasic: getChecked('doctorReportBasic'),
+                    doctorReportExtended: getChecked('doctorReportExtended'),
                 },
             });
         }
@@ -1774,6 +1833,9 @@ export class InstallerWizardPanel {
             setCheck('flagFast', fd.flagFast);
             setCheck('flagNoResume', fd.flagNoResume);
             setCheck('flagVerbose', fd.flagVerbose);
+            setCheck('doctorReportBasic', fd.doctorReportBasic);
+            setCheck('doctorReportExtended', fd.doctorReportExtended);
+            onReportOptionChange();
 
             selectMode(wizardMode);
             updateAuthFields();
@@ -1951,7 +2013,12 @@ export class InstallerWizardPanel {
                     nextBtn.textContent = 'Install';
                 } else if (currentStep === 2 && !getStepNumbers().includes(3)) {
                     // Doctor/Resume mode — next step is 7
-                    nextBtn.textContent = wizardMode === 'doctor' ? 'Run Doctor' : 'Resume';
+                    if (wizardMode === 'doctor') {
+                        const hasReport = getChecked('doctorReportBasic') || getChecked('doctorReportExtended');
+                        nextBtn.textContent = hasReport ? 'Run Doctor + Report' : 'Run Doctor';
+                    } else {
+                        nextBtn.textContent = 'Resume';
+                    }
                 } else {
                     nextBtn.textContent = 'Next';
                 }
@@ -2076,6 +2143,12 @@ export class InstallerWizardPanel {
                 versionGroup.classList.toggle('hidden', mode !== 'install');
             }
 
+            // Show/hide doctor report options
+            const reportGroup = document.getElementById('doctorReportGroup');
+            if (reportGroup) {
+                reportGroup.classList.toggle('hidden', mode !== 'doctor');
+            }
+
             // Reset completed steps since step set changed
             completedSteps.clear();
 
@@ -2101,7 +2174,7 @@ export class InstallerWizardPanel {
                 folders.map(f =>
                     '<button class="workspace-shortcut" onclick="setDirectory(\\'' +
                     f.path.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'") +
-                    '\\')" title="' + f.path + '">' + f.name + '</button>'
+                    '\\')" title="' + escapeHtml(f.path) + '">' + escapeHtml(f.name) + '</button>'
                 ).join('');
         }
 
@@ -2264,6 +2337,10 @@ export class InstallerWizardPanel {
             if (anthropicKey) config.AnthropicKey = anthropicKey;
             if (mistralKey) config.MistralKey = mistralKey;
 
+            // Encryption key
+            const encryptionKey = document.getElementById('baseEncryptionKey').value.trim();
+            if (encryptionKey) config.BaseEncryptionKey = encryptionKey;
+
             // New user
             const email = document.getElementById('newUserEmail').value.trim();
             if (email) {
@@ -2291,7 +2368,7 @@ export class InstallerWizardPanel {
             }
 
             function val(v) {
-                return v || '<span style="color:var(--vscode-descriptionForeground);">not set</span>';
+                return v ? escapeHtml(String(v)) : '<span style="color:var(--vscode-descriptionForeground);">not set</span>';
             }
 
             function editLink(step) {
@@ -2307,7 +2384,7 @@ export class InstallerWizardPanel {
 
             // Database
             html += '<tr class="review-section-header"><td colspan="2">Database ' + editLink(3) + '</td></tr>';
-            html += '<tr><th>Host</th><td>' + config.DatabaseHost + ':' + config.DatabasePort + '</td></tr>';
+            html += '<tr><th>Host</th><td>' + escapeHtml(config.DatabaseHost) + ':' + config.DatabasePort + '</td></tr>';
             html += '<tr><th>Database</th><td>' + val(config.DatabaseName) + '</td></tr>';
             html += '<tr><th>Trust Cert</th><td>' + (config.DatabaseTrustCert ? 'Yes' : 'No') + '</td></tr>';
             html += '<tr><th>CodeGen Login</th><td>' + val(config.CodeGenUser) + ' / ' + mask(config.CodeGenPassword) + '</td></tr>';
@@ -2317,7 +2394,7 @@ export class InstallerWizardPanel {
             html += '<tr class="review-section-header"><td colspan="2">Services & Auth ' + editLink(4) + '</td></tr>';
             html += '<tr><th>API Port</th><td>' + config.APIPort + '</td></tr>';
             html += '<tr><th>Explorer Port</th><td>' + config.ExplorerPort + '</td></tr>';
-            html += '<tr><th>Auth Provider</th><td>' + config.AuthProvider + '</td></tr>';
+            html += '<tr><th>Auth Provider</th><td>' + escapeHtml(config.AuthProvider) + '</td></tr>';
 
             if (config.AuthProvider === 'entra' && config.AuthProviderValues) {
                 html += '<tr><th>Tenant ID</th><td>' + val(config.AuthProviderValues.TenantID) + '</td></tr>';
@@ -2334,7 +2411,8 @@ export class InstallerWizardPanel {
                 [config.OpenAIKey ? 'OpenAI' : null, config.AnthropicKey ? 'Anthropic' : null, config.MistralKey ? 'Mistral' : null]
                     .filter(Boolean).join(', ') || 'None';
             html += '</td></tr>';
-            html += '<tr><th>New User</th><td>' + (config.CreateNewUser ? config.CreateNewUser.Email : 'None') + '</td></tr>';
+            html += '<tr><th>Encryption Key</th><td>' + (config.BaseEncryptionKey ? 'Custom key provided' : 'Auto-generate') + '</td></tr>';
+            html += '<tr><th>New User</th><td>' + (config.CreateNewUser ? escapeHtml(config.CreateNewUser.Email) : 'None') + '</td></tr>';
 
             // Flags
             const activeFlags = [];
@@ -2409,18 +2487,61 @@ export class InstallerWizardPanel {
             const targetDir = document.getElementById('targetDir').value.trim();
             if (!targetDir) return;
 
+            const reportBasic = document.getElementById('doctorReportBasic').checked;
+            const reportExtended = document.getElementById('doctorReportExtended').checked;
+            const generatingReport = reportBasic || reportExtended;
+
             isRunning = true;
             document.getElementById('progressTitle').textContent = 'Running Diagnostics';
-            document.getElementById('progressSubtitle').textContent = 'Checking your MemberJunction installation...';
+            document.getElementById('progressSubtitle').textContent = generatingReport
+                ? 'Running diagnostics and generating report...'
+                : 'Checking your MemberJunction installation...';
             document.getElementById('diagnosticsArea').classList.remove('hidden');
             document.getElementById('diagnosticsList').innerHTML = '';
-            document.getElementById('logSection').classList.add('hidden');
+            // Show log section when generating extended report (captures service logs)
+            if (reportExtended) {
+                document.getElementById('logSection').classList.remove('hidden');
+                document.getElementById('logArea').innerHTML = '';
+                logLines = [];
+            } else {
+                document.getElementById('logSection').classList.add('hidden');
+            }
             document.getElementById('completionBanner').innerHTML = '';
             document.getElementById('completionBanner').classList.add('hidden');
 
             goToStep(7);
 
-            vscode.postMessage({ type: 'startDoctor', targetDir });
+            const options = {};
+            if (reportBasic) options.Report = true;
+            if (reportExtended) options.ReportExtended = true;
+
+            vscode.postMessage({ type: 'startDoctor', targetDir, options });
+        }
+
+        function onReportOptionChange() {
+            // If extended is checked, basic is implied (uncheck basic to avoid confusion)
+            const extendedEl = document.getElementById('doctorReportExtended');
+            const basicEl = document.getElementById('doctorReportBasic');
+            if (extendedEl.checked) {
+                basicEl.checked = false;
+                basicEl.disabled = true;
+            } else {
+                basicEl.disabled = false;
+            }
+            updateFooter();
+            saveState();
+        }
+
+        function viewReport() {
+            if (lastReportPath) {
+                vscode.postMessage({ type: 'openReportFile', path: lastReportPath });
+            }
+        }
+
+        function revealReport() {
+            if (lastReportPath) {
+                vscode.postMessage({ type: 'revealReportFile', path: lastReportPath });
+            }
         }
 
         function startResume() {
@@ -2767,11 +2888,27 @@ export class InstallerWizardPanel {
                         '</div>';
                 }
 
+                let reportHtml = '';
+                if (data.reportPath) {
+                    lastReportPath = data.reportPath;
+                    reportHtml = '<div style="margin-top:8px;font-size:12px;opacity:0.85;">' +
+                        '<strong>Report:</strong> ' + escapeHtml(data.reportPath) +
+                        '</div>';
+                }
+
+                let reportBtns = '';
+                if (data.reportPath) {
+                    reportBtns =
+                        '<button class="btn-primary" onclick="viewReport()">View Report</button>' +
+                        '<button class="btn-secondary" onclick="revealReport()">Open in File Explorer</button>';
+                }
+
                 banner.innerHTML =
                     '<h2>' + (hasFailures ? '&#10007; Issues Found' : '&#10003; All Checks Passed') + '</h2>' +
                     '<p>' + data.passCount + ' passed, ' + data.warnCount + ' warnings, ' + data.failCount + ' failed</p>' +
-                    envHtml + lastInstallHtml +
+                    envHtml + lastInstallHtml + reportHtml +
                     '<div class="btn-row" style="margin-top:12px;">' +
+                        reportBtns +
                         '<button class="btn-secondary" onclick="vscode.postMessage({type:\\'showLog\\'})">Show Full Log</button>' +
                         '<button class="btn-secondary" onclick="startOver()">Start Over</button>' +
                     '</div>';
@@ -2820,21 +2957,23 @@ export class InstallerWizardPanel {
         function applyLoadedConfig(config) {
             if (!config) return;
 
-            // Map config fields to form fields
+            // Simple field mapping: config key → form element ID
             const fieldMap = {
-                Dir: 'targetDir',
-                Tag: 'versionSelect',
-                SqlHost: 'dbHost',
-                SqlPort: 'dbPort',
-                SqlDatabase: 'dbDatabase',
-                SqlUser: 'dbUser',
-                EnableGraphQL: 'enableGraphQL',
-                EnableExplorer: 'enableExplorer',
-                GraphQLPort: 'apiPort',
+                DatabaseHost: 'dbHost',
+                DatabasePort: 'dbPort',
+                DatabaseName: 'dbName',
+                DatabaseTrustCert: 'dbTrustCert',
+                CodeGenUser: 'codegenUser',
+                CodeGenPassword: 'codegenPassword',
+                APIUser: 'apiUser',
+                APIPassword: 'apiPassword',
+                APIPort: 'apiPort',
                 ExplorerPort: 'explorerPort',
                 AuthProvider: 'authProvider',
-                CreateSampleData: 'createSampleData',
-                RunCodeGen: 'runCodeGen',
+                OpenAIKey: 'openaiKey',
+                AnthropicKey: 'anthropicKey',
+                MistralKey: 'mistralKey',
+                BaseEncryptionKey: 'baseEncryptionKey',
             };
 
             for (const key in fieldMap) {
@@ -2849,12 +2988,52 @@ export class InstallerWizardPanel {
                 }
             }
 
+            // Auth provider values (nested object)
+            if (config.AuthProviderValues) {
+                const apv = config.AuthProviderValues;
+                if (config.AuthProvider === 'entra') {
+                    setVal('entraTenantId', apv.TenantID);
+                    setVal('entraClientId', apv.ClientID);
+                } else if (config.AuthProvider === 'auth0') {
+                    setVal('auth0Domain', apv.Domain);
+                    setVal('auth0ClientId', apv.ClientID);
+                    setVal('auth0ClientSecret', apv.ClientSecret);
+                }
+            }
+
+            // New user (nested object)
+            if (config.CreateNewUser) {
+                const u = config.CreateNewUser;
+                setVal('newUserEmail', u.Email);
+                setVal('newUserUsername', u.Username);
+                setVal('newUserFirstName', u.FirstName);
+                setVal('newUserLastName', u.LastName);
+            }
+
+            // Flags (if saved)
+            if (config.Flags) {
+                setCheck('flagSkipDB', config.Flags.SkipDB);
+                setCheck('flagSkipCodeGen', config.Flags.SkipCodeGen);
+                setCheck('flagSkipStart', config.Flags.SkipStart);
+                setCheck('flagFast', config.Flags.Fast);
+                setCheck('flagNoResume', config.Flags.NoResume);
+                setCheck('flagVerbose', config.Flags.Verbose);
+            }
+
+            // Dir and Tag (from saveConfig extras)
+            if (config.Dir) setVal('targetDir', config.Dir);
+            if (config.Tag) setVal('versionSelect', config.Tag);
+
+            // Update dependent UI
+            updateAuthFields();
+            saveState();
+
             vscode.postMessage({ type: 'showInfo', text: 'Configuration loaded.' });
         }
 
         function startOver() {
             isRunning = false;
-            completedSteps = [];
+            completedSteps = new Set();
             const banner = document.getElementById('completionBanner');
             if (banner) { banner.classList.add('hidden'); banner.innerHTML = ''; }
             goToStep(1);
@@ -2987,6 +3166,7 @@ export class InstallerWizardPanel {
             if (!str) return '';
             return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
+
 
         // ================================================================
         // Initialize
