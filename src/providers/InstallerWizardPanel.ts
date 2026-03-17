@@ -115,6 +115,7 @@ export class InstallerWizardPanel {
     // Service event forwarding
     // -----------------------------------------------------------------------
 
+    /** Wire service events (phase updates, status changes, diagnostics, step progress, logs) to webview messages. */
     private setupServiceListeners(): void {
         this.serviceListeners.push(
             this.service.onPhaseUpdate((phases: PhaseDisplayState[]) => {
@@ -165,6 +166,7 @@ export class InstallerWizardPanel {
     // Message handling
     // -----------------------------------------------------------------------
 
+    /** Route incoming webview messages to the appropriate handler method. */
     private async handleMessage(message: WebviewMessage): Promise<void> {
         switch (message.type) {
             case 'ready':
@@ -254,6 +256,10 @@ export class InstallerWizardPanel {
         }
     }
 
+    /**
+     * Handle the webview's `ready` message — send workspace folders and phase labels,
+     * then re-attach to any running operation (replaying buffered log entries).
+     */
     private handleReady(): void {
         const workspaceFolders = (vscode.workspace.workspaceFolders ?? []).map(f => ({
             name: f.name,
@@ -286,6 +292,7 @@ export class InstallerWizardPanel {
         }
     }
 
+    /** Open a native folder picker and send the selected path back to the webview. */
     private async handleBrowseDirectory(): Promise<void> {
         const folders = await vscode.window.showOpenDialog({
             canSelectFolders: true,
@@ -299,6 +306,7 @@ export class InstallerWizardPanel {
         }
     }
 
+    /** Fetch available MJ release versions from GitHub and send them to the webview dropdown. */
     private async handleFetchVersions(includePrerelease: boolean): Promise<void> {
         try {
             const versions: VersionInfo[] = await this.service.listVersions(includePrerelease);
@@ -321,6 +329,7 @@ export class InstallerWizardPanel {
         }
     }
 
+    /** Test TCP connectivity to a SQL Server instance and send the result to the webview. */
     private async handleTestConnection(host: string, port: number): Promise<void> {
         try {
             const result: SqlConnectivityResult = await this.service.testConnection(host, port);
@@ -335,6 +344,7 @@ export class InstallerWizardPanel {
         }
     }
 
+    /** Start a full install flow (plan + execute). Guards against duplicate starts. Sends completion result to webview. */
     private async handleStartInstall(
         planInput: CreatePlanInput,
         options: RunOptions
@@ -364,6 +374,7 @@ export class InstallerWizardPanel {
         }
     }
 
+    /** Run doctor diagnostics on a target directory. Guards against duplicate starts. Sends summary to webview. */
     private async handleStartDoctor(
         targetDir: string,
         options?: DoctorOptions
@@ -390,6 +401,7 @@ export class InstallerWizardPanel {
         }
     }
 
+    /** Resume a previously interrupted install from checkpoint state. Guards against duplicate starts. */
     private async handleStartResume(targetDir: string): Promise<void> {
         if (this.service.status === 'running' || this.service.status === 'planning') {
             return;
@@ -483,10 +495,12 @@ export class InstallerWizardPanel {
     // Helpers
     // -----------------------------------------------------------------------
 
+    /** Post a JSON message to the webview panel. */
     private sendMessage(message: Record<string, unknown>): void {
         this.panel.webview.postMessage(message);
     }
 
+    /** Dispose the panel, service listeners, and all VS Code disposables. Clears the singleton reference. */
     public dispose(): void {
         InstallerWizardPanel.CurrentPanel = undefined;
 
@@ -507,6 +521,10 @@ export class InstallerWizardPanel {
     // HTML generation
     // -----------------------------------------------------------------------
 
+    /**
+     * Generate the complete HTML document for the wizard webview.
+     * Includes all CSS, JS, and the 7-step wizard UI (Welcome, Location, Database, Services, Options, Review, Progress).
+     */
     private getHtmlForWebview(_webview: vscode.Webview, initialMode: WizardMode): string {
         return `<!DOCTYPE html>
 <html lang="en">

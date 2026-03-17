@@ -26,6 +26,30 @@ import type {
     SqlConnectivityResult,
 } from '@memberjunction/installer';
 
+// -----------------------------------------------------------------------
+// Installer module source configuration
+// -----------------------------------------------------------------------
+// By default, the extension loads @memberjunction/installer from npm.
+// To use a local build instead (e.g., for testing unreleased features),
+// comment out INSTALLER_SPECIFIER and uncomment LOCAL_INSTALLER_PATH below.
+//
+// Local path setup:
+//   1. Clone the MJ repo and build the installer:
+//        cd <your-mj-repo>/packages/MJInstaller && npm run build
+//   2. Set the path below to your local MJInstaller dist directory.
+//      Use forward slashes on all platforms (Windows, macOS, Linux).
+//      Examples:
+//        Windows:  'C:/Dev/MJ/MJ/packages/MJInstaller/dist/index.js'
+//        macOS:    '/Users/you/MJ/packages/MJInstaller/dist/index.js'
+//        Linux:    '/home/you/MJ/packages/MJInstaller/dist/index.js'
+//   3. Recompile the extension: npm run compile
+
+// --- Option A: npm package (default) ---
+const INSTALLER_SPECIFIER = '@memberjunction/installer';
+
+// --- Option B: local build (uncomment and set your path) ---
+// const INSTALLER_SPECIFIER = 'file:///C:/Dev/MJ/MJ/packages/MJInstaller/dist/index.js';
+
 // Bypass TypeScript's CommonJS transformation of import() → require().
 // Required because @memberjunction/installer is ESM-only and require() can't load ESM.
 // Using Function constructor creates a real ES import() that TypeScript can't intercept.
@@ -39,32 +63,49 @@ const esmImport = new Function('specifier', 'return import(specifier)') as
 /** Overall status of the installer service. */
 export type InstallerStatus = 'idle' | 'planning' | 'running' | 'completed' | 'failed' | 'cancelled';
 
-/** Tracks the visual state of a single install phase. */
+/** Tracks the visual state of a single install phase in the UI (tree view, webview, status bar). */
 export interface PhaseDisplayState {
+    /** Engine phase identifier (e.g., `'preflight'`, `'database'`, `'codegen'`). */
     Phase: PhaseId;
+    /** Human-readable phase description shown in the UI. */
     Description: string;
+    /** Current execution status of this phase. */
     Status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+    /** Wall-clock duration in milliseconds (set when the phase completes or fails). */
     DurationMs?: number;
+    /** Error message captured from the engine when the phase fails. */
     ErrorMessage?: string;
+    /** Machine-readable error code from `InstallerError.Code` (e.g., `'NPM_INSTALL_FAILED'`). */
     ErrorCode?: string;
+    /** Actionable remediation text from `InstallerError.SuggestedFix`. */
     SuggestedFix?: string;
 }
 
-/** Tracks a single diagnostic check result. */
+/** Tracks a single diagnostic check result from the doctor flow. */
 export interface DiagnosticDisplayState {
+    /** Name of the diagnostic check (e.g., `'Node.js version'`, `'Database connectivity'`). */
     Check: string;
+    /** Outcome of the check. */
     Status: 'pass' | 'fail' | 'warn' | 'info';
+    /** Human-readable detail message for the check result. */
     Message: string;
+    /** Actionable remediation text (shown with lightbulb icon in the tree view). */
     SuggestedFix?: string;
 }
 
-/** Summary result from doctor diagnostics. */
+/** Summary result from the doctor diagnostics flow, sent to the webview for rendering. */
 export interface DoctorResult {
+    /** Whether any diagnostic check returned `'fail'` status. */
     HasFailures: boolean;
+    /** Number of checks that passed. */
     PassCount: number;
+    /** Number of checks that returned warnings. */
     WarnCount: number;
+    /** Number of checks that failed. */
     FailCount: number;
+    /** Environment snapshot captured by the engine (OS, Node, npm, architecture). */
     Environment: { OS: string; NodeVersion: string; NpmVersion: string; Architecture: string };
+    /** Details of the last install checkpoint found on disk, or `null` if none exists. */
     LastInstall: { Tag: string; Timestamp: string } | null;
     /** Absolute path to the generated report file (if Report or ReportExtended was requested). */
     ReportPath: string | null;
@@ -174,7 +215,7 @@ export class InstallerService {
      */
     private async createEngine(): Promise<InstallerEngineType> {
         if (!this.installerModule) {
-            this.installerModule = await esmImport('@memberjunction/installer');
+            this.installerModule = await esmImport(INSTALLER_SPECIFIER);
         }
         const engine = new this.installerModule.InstallerEngine();
         this.engine = engine;
@@ -340,7 +381,7 @@ export class InstallerService {
      */
     async testConnection(host: string, port: number): Promise<SqlConnectivityResult> {
         if (!this.installerModule) {
-            this.installerModule = await esmImport('@memberjunction/installer');
+            this.installerModule = await esmImport(INSTALLER_SPECIFIER);
         }
         const adapter = new this.installerModule.SqlServerAdapter();
         return adapter.CheckConnectivity(host, port);
@@ -353,7 +394,7 @@ export class InstallerService {
      */
     async checkInstallState(dir: string): Promise<Record<string, unknown> | null> {
         if (!this.installerModule) {
-            this.installerModule = await esmImport('@memberjunction/installer');
+            this.installerModule = await esmImport(INSTALLER_SPECIFIER);
         }
         const exists = await this.installerModule.InstallState.Exists(dir);
         if (!exists) return null;
@@ -368,7 +409,7 @@ export class InstallerService {
      */
     async loadConfigFromFile(filePath: string): Promise<Record<string, unknown>> {
         if (!this.installerModule) {
-            this.installerModule = await esmImport('@memberjunction/installer');
+            this.installerModule = await esmImport(INSTALLER_SPECIFIER);
         }
         const config = await this.installerModule.loadConfigFile(filePath);
         return JSON.parse(JSON.stringify(config)) as Record<string, unknown>;
@@ -378,6 +419,7 @@ export class InstallerService {
     // Event handlers
     // -----------------------------------------------------------------------
 
+    /** Handle `phase:start` — mark the phase as running and log it to the output channel. */
     private handlePhaseStart(e: PhaseStartEvent): void {
         const phase = this.findOrCreatePhase(e.Phase, e.Description);
         phase.Status = 'running';
@@ -387,6 +429,12 @@ export class InstallerService {
         OutputChannel.info(`  ${e.Description}`);
     }
 
+    /**
+     * Handle `phase:end` — update status, capture duration/errors, and run post-phase hooks.
+     *
+     * After the `configure` phase, syncs database env vars into `process.env`.
+     * After the `platform` phase, runs a supplementary single-quote script patch.
+     */
     private handlePhaseEnd(e: PhaseEndEvent): void {
         const phase = this.findOrCreatePhase(e.Phase);
         phase.Status = e.Status;
@@ -420,12 +468,14 @@ export class InstallerService {
         }
     }
 
+    /** Handle `step:progress` — log to output channel and forward to webview via event emitter. */
     private handleStepProgress(e: StepProgressEvent): void {
         const pct = e.Percent != null ? ` (${e.Percent}%)` : '';
         OutputChannel.info(`  ${e.Message}${pct}`);
         this._onStepProgress.fire({ Phase: e.Phase, Message: e.Message, Percent: e.Percent });
     }
 
+    /** Handle `log` — write to output channel, fire event, buffer for replay, and capture report paths. */
     private handleLog(e: LogEvent): void {
         if (e.Level === 'info') {
             OutputChannel.info(e.Message);
@@ -443,6 +493,7 @@ export class InstallerService {
         }
     }
 
+    /** Handle `warn` — log, show a VS Code warning notification, and buffer for replay. */
     private handleWarn(e: WarnEvent): void {
         OutputChannel.warn(e.Message);
         vscode.window.showWarningMessage(`MJ Installer: ${e.Message}`);
@@ -450,6 +501,7 @@ export class InstallerService {
         this.bufferLog('warn', e.Message);
     }
 
+    /** Handle `error` — log, show a VS Code error notification with "Show Details" action, and buffer. */
     private handleError(e: ErrorEvent): void {
         const msg = `[${e.Phase}] ${e.Error.message}`;
         OutputChannel.error(msg);
@@ -514,6 +566,7 @@ export class InstallerService {
         e.Resolve(answer ?? e.Default ?? '');
     }
 
+    /** Handle `diagnostic` — append to diagnostics array, fire update event, and log to output channel. */
     private handleDiagnostic(e: DiagnosticEvent): void {
         const diag: DiagnosticDisplayState = {
             Check: e.Check,
@@ -540,11 +593,13 @@ export class InstallerService {
     // Helpers
     // -----------------------------------------------------------------------
 
+    /** Update internal status and fire the status-change event. */
     private setStatus(status: InstallerStatus): void {
         this._status = status;
         this._onStatusChange.fire(status);
     }
 
+    /** Clear all phases, diagnostics, and log buffer — called at the start of each new operation. */
     private resetState(): void {
         this._phases = [];
         this._diagnostics = [];
@@ -571,6 +626,7 @@ export class InstallerService {
         this._onPhaseUpdate.fire(this._phases);
     }
 
+    /** Look up an existing phase display state by ID, or create a new one if not found. */
     private findOrCreatePhase(phaseId: PhaseId, description?: string): PhaseDisplayState {
         let phase = this._phases.find(p => p.Phase === phaseId);
         if (!phase) {
@@ -590,6 +646,7 @@ export class InstallerService {
         return lower.includes('password') || lower.includes('secret') || lower.includes('key');
     }
 
+    /** Format milliseconds as a human-readable duration string (e.g., "1.2s" or "350ms"). */
     private formatDuration(ms?: number): string {
         if (ms == null) return '';
         if (ms < 1000) return `${ms}ms`;
@@ -600,6 +657,7 @@ export class InstallerService {
     // Disposal
     // -----------------------------------------------------------------------
 
+    /** Release the engine reference and dispose all VS Code event emitters. */
     dispose(): void {
         this.engine = null;
         this._onStatusChange.dispose();

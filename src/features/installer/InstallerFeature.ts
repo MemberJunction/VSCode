@@ -30,11 +30,16 @@ export class InstallerFeature implements Feature {
         this.service = InstallerService.getInstance();
     }
 
+    /** Whether the installer feature is enabled (controlled by `memberjunction.features.installer.enabled` setting). */
     enabled(): boolean {
         const config = vscode.workspace.getConfiguration('memberjunction');
         return config.get<boolean>('features.installer.enabled', true);
     }
 
+    /**
+     * Activate the installer feature: register commands, tree view, status bar, and event listeners.
+     * Sets the `memberjunction.installerEnabled` context key so the sidebar is visible to new users.
+     */
     async activate(context: vscode.ExtensionContext): Promise<void> {
         if (!this.enabled()) {
             OutputChannel.info('Installer feature is disabled');
@@ -56,6 +61,7 @@ export class InstallerFeature implements Feature {
         OutputChannel.info('Installer feature activated');
     }
 
+    /** Clean up timers, tree provider, and disposables on feature deactivation. */
     async deactivate(): Promise<void> {
         if (this.statusResetTimeout) {
             clearTimeout(this.statusResetTimeout);
@@ -70,6 +76,7 @@ export class InstallerFeature implements Feature {
     // Command registration
     // -------------------------------------------------------------------
 
+    /** Register all installer-related VS Code commands (install, doctor, resume, cancel, log, clipboard). */
     private registerCommands(context: vscode.ExtensionContext): void {
         context.subscriptions.push(
             vscode.commands.registerCommand('memberjunction.install', () => this.runInstall())
@@ -118,6 +125,7 @@ export class InstallerFeature implements Feature {
     // TreeView
     // -------------------------------------------------------------------
 
+    /** Create and register the sidebar tree view that shows install phases or doctor diagnostics. */
     private registerTreeView(context: vscode.ExtensionContext): void {
         this.phaseProvider = new InstallerPhaseProvider();
 
@@ -133,6 +141,7 @@ export class InstallerFeature implements Feature {
     // Status bar
     // -------------------------------------------------------------------
 
+    /** Register the "MJ Installer" status bar item and set its initial state. */
     private setupStatusBar(): void {
         StatusBarManager.register('installer', {
             alignment: vscode.StatusBarAlignment.Left,
@@ -142,6 +151,7 @@ export class InstallerFeature implements Feature {
         this.updateStatusBar(this.service.status);
     }
 
+    /** Subscribe to service status and phase events to keep the status bar up to date. */
     private setupEventListeners(): void {
         const statusListener = this.service.onStatusChange(status => {
             this.updateStatusBar(status);
@@ -179,6 +189,7 @@ export class InstallerFeature implements Feature {
         }, delayMs);
     }
 
+    /** Update the status bar icon, text, tooltip, and command based on the current installer status. */
     private updateStatusBar(status: InstallerStatus): void {
         switch (status) {
             case 'idle':
@@ -239,6 +250,7 @@ export class InstallerFeature implements Feature {
     // Install command
     // -------------------------------------------------------------------
 
+    /** Open the installer wizard panel in "install" mode. Guards against duplicate operations. */
     private async runInstall(): Promise<void> {
         if (this.service.status === 'running' || this.service.status === 'planning') {
             vscode.window.showWarningMessage('An install operation is already in progress.');
@@ -254,6 +266,7 @@ export class InstallerFeature implements Feature {
     // Doctor command
     // -------------------------------------------------------------------
 
+    /** Open the installer wizard panel in "doctor" mode. Guards against duplicate operations. */
     private async runDoctor(): Promise<void> {
         if (this.service.status === 'running') {
             vscode.window.showWarningMessage('An install operation is already in progress.');
@@ -269,6 +282,7 @@ export class InstallerFeature implements Feature {
     // Resume command
     // -------------------------------------------------------------------
 
+    /** Open the installer wizard panel in "resume" mode. Guards against duplicate operations. */
     private async runResume(): Promise<void> {
         if (this.service.status === 'running') {
             vscode.window.showWarningMessage('An install operation is already in progress.');
