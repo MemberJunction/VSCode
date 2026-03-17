@@ -5,9 +5,12 @@ import { InstallerService, PhaseDisplayState, DiagnosticDisplayState } from '../
 // Tree item types
 // -----------------------------------------------------------------------
 
+/** Tree item representing a single install phase (e.g., "Scaffold Project", "Run Migrations"). */
 class PhaseTreeItem extends vscode.TreeItem {
     constructor(
+        /** The phase display state backing this tree item. */
         public readonly phase: PhaseDisplayState,
+        /** Child items such as error details or suggested fixes. */
         public readonly children: vscode.TreeItem[] = []
     ) {
         super(
@@ -26,9 +29,12 @@ class PhaseTreeItem extends vscode.TreeItem {
     }
 }
 
+/** Tree item representing a single doctor diagnostic check result. */
 class DiagnosticTreeItem extends vscode.TreeItem {
     constructor(
+        /** The diagnostic display state backing this tree item. */
         public readonly diagnostic: DiagnosticDisplayState,
+        /** Child items such as suggested fixes. */
         public readonly children: vscode.TreeItem[] = []
     ) {
         super(
@@ -44,6 +50,7 @@ class DiagnosticTreeItem extends vscode.TreeItem {
     }
 }
 
+/** Tree item displaying a suggested fix (lightbulb icon) for a failed phase or diagnostic. */
 class SuggestedFixItem extends vscode.TreeItem {
     constructor(fix: string) {
         super(fix, vscode.TreeItemCollapsibleState.None);
@@ -52,6 +59,7 @@ class SuggestedFixItem extends vscode.TreeItem {
     }
 }
 
+/** Tree item displaying an error code and message (info icon) for a failed phase. */
 class ErrorDetailItem extends vscode.TreeItem {
     constructor(message: string) {
         super(message, vscode.TreeItemCollapsibleState.None);
@@ -131,7 +139,7 @@ export class InstallerPhaseProvider implements vscode.TreeDataProvider<Installer
         return [];
     }
 
-    /** Build a tree item for a phase, adding error details and suggested fixes as children. */
+    /** Build a tree item for a single phase, attaching error details and suggested fixes as children. */
     private buildPhaseItem(phase: PhaseDisplayState): PhaseTreeItem {
         const children: vscode.TreeItem[] = [];
 
@@ -148,6 +156,7 @@ export class InstallerPhaseProvider implements vscode.TreeDataProvider<Installer
         return new PhaseTreeItem(phase, children);
     }
 
+    /** Build a tree item for a single diagnostic check, attaching suggested fixes as children. */
     private buildDiagnosticItem(diagnostic: DiagnosticDisplayState): DiagnosticTreeItem {
         const children: vscode.TreeItem[] = [];
 
@@ -158,10 +167,12 @@ export class InstallerPhaseProvider implements vscode.TreeDataProvider<Installer
         return new DiagnosticTreeItem(diagnostic, children);
     }
 
+    /** Force a full tree refresh (fires onDidChangeTreeData for the root). */
     refresh(): void {
         this._onDidChangeTreeData.fire(undefined);
     }
 
+    /** Dispose the event emitter and all service-event subscriptions. */
     dispose(): void {
         this._onDidChangeTreeData.dispose();
         this.disposables.forEach(d => d.dispose());
@@ -172,6 +183,7 @@ export class InstallerPhaseProvider implements vscode.TreeDataProvider<Installer
 // Helpers
 // -----------------------------------------------------------------------
 
+/** Map a phase status to the appropriate VS Code theme icon (spinner, check, error, dash). */
 function phaseStatusIcon(status: PhaseDisplayState['Status']): vscode.ThemeIcon {
     switch (status) {
         case 'pending':
@@ -187,6 +199,7 @@ function phaseStatusIcon(status: PhaseDisplayState['Status']): vscode.ThemeIcon 
     }
 }
 
+/** Map a diagnostic status to the appropriate VS Code theme icon with status color. */
 function diagnosticStatusIcon(status: DiagnosticDisplayState['Status']): vscode.ThemeIcon {
     switch (status) {
         case 'pass':
@@ -200,6 +213,7 @@ function diagnosticStatusIcon(status: DiagnosticDisplayState['Status']): vscode.
     }
 }
 
+/** Format a duration in milliseconds as a human-readable string (e.g., "1.2s" or "350ms"). */
 function formatDuration(ms: number): string {
     if (ms < 1000) return `${ms}ms`;
     return `${(ms / 1000).toFixed(1)}s`;
