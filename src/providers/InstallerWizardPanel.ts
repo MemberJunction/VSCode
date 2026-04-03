@@ -1662,6 +1662,10 @@ export class InstallerWizardPanel {
                     <label for="flagNoResume">Fresh Start (ignore previous checkpoint)</label>
                 </div>
                 <div class="checkbox-group">
+                    <input type="checkbox" id="flagOverwriteConfig" />
+                    <label for="flagOverwriteConfig">Overwrite Config Files (replace .env, mj.config.cjs, environment.ts)</label>
+                </div>
+                <div class="checkbox-group">
                     <input type="checkbox" id="flagVerbose" />
                     <label for="flagVerbose">Verbose Logging</label>
                 </div>
@@ -1805,6 +1809,7 @@ export class InstallerWizardPanel {
                     flagSkipStart: getChecked('flagSkipStart'),
                     flagFast: getChecked('flagFast'),
                     flagNoResume: getChecked('flagNoResume'),
+                    flagOverwriteConfig: getChecked('flagOverwriteConfig'),
                     flagVerbose: getChecked('flagVerbose'),
                     doctorReportBasic: getChecked('doctorReportBasic'),
                     doctorReportExtended: getChecked('doctorReportExtended'),
@@ -1850,6 +1855,7 @@ export class InstallerWizardPanel {
             setCheck('flagSkipStart', fd.flagSkipStart);
             setCheck('flagFast', fd.flagFast);
             setCheck('flagNoResume', fd.flagNoResume);
+            setCheck('flagOverwriteConfig', fd.flagOverwriteConfig);
             setCheck('flagVerbose', fd.flagVerbose);
             setCheck('doctorReportBasic', fd.doctorReportBasic);
             setCheck('doctorReportExtended', fd.doctorReportExtended);
@@ -2439,6 +2445,7 @@ export class InstallerWizardPanel {
             if (flags.SkipStart) activeFlags.push('Skip Smoke Test');
             if (flags.Fast) activeFlags.push('Fast Mode');
             if (flags.NoResume) activeFlags.push('Fresh Start');
+            if (flags.OverwriteConfig) activeFlags.push('Overwrite Config');
             if (flags.Verbose) activeFlags.push('Verbose');
             html += '<tr><th>Flags</th><td>' + (activeFlags.length > 0 ? activeFlags.join(', ') : 'Default (all phases)') + '</td></tr>';
 
@@ -2453,6 +2460,7 @@ export class InstallerWizardPanel {
                 SkipStart: document.getElementById('flagSkipStart').checked,
                 Fast: document.getElementById('flagFast').checked,
                 NoResume: document.getElementById('flagNoResume').checked,
+                OverwriteConfig: document.getElementById('flagOverwriteConfig').checked,
                 Verbose: document.getElementById('flagVerbose').checked,
             };
         }
@@ -2495,6 +2503,7 @@ export class InstallerWizardPanel {
                     Yes: true,
                     Verbose: flags.Verbose,
                     NoResume: flags.NoResume,
+                    OverwriteConfig: flags.OverwriteConfig,
                     Config: config,
                 },
             });
@@ -3035,6 +3044,7 @@ export class InstallerWizardPanel {
                 setCheck('flagSkipStart', config.Flags.SkipStart);
                 setCheck('flagFast', config.Flags.Fast);
                 setCheck('flagNoResume', config.Flags.NoResume);
+                setCheck('flagOverwriteConfig', config.Flags.OverwriteConfig);
                 setCheck('flagVerbose', config.Flags.Verbose);
             }
 
