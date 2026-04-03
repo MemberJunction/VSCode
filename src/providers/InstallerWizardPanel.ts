@@ -1661,6 +1661,10 @@ export class InstallerWizardPanel {
                     <input type="checkbox" id="flagNoResume" />
                     <label for="flagNoResume">Fresh Start (ignore previous checkpoint)</label>
                 </div>
+                <p style="margin:6px 0 4px 24px;font-size:12px;opacity:0.75;">
+                    To update an existing installation to a newer version, check "Fresh Start" above and select the new version.
+                    Alternatively, delete the install directory and run a fresh install.
+                </p>
                 <div class="checkbox-group">
                     <input type="checkbox" id="flagOverwriteConfig" />
                     <label for="flagOverwriteConfig">Overwrite Config Files (replace .env, mj.config.cjs, environment.ts)</label>
