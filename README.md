@@ -333,7 +333,7 @@ Make sure you have a valid MemberJunction workspace with:
 
 ## Contributing
 
-This extension is part of the MemberJunction open-source project.
+This extension is part of the MemberJunction project.
 
 - Report issues: [GitHub Issues](https://github.com/MemberJunction/MJVSCode/issues)
 - Documentation: [MemberJunction Docs](https://docs.memberjunction.org)
@@ -341,7 +341,7 @@ This extension is part of the MemberJunction open-source project.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+Business Source License 1.1 — see [LICENSE](./LICENSE) for details.
 
 ## Links
 
