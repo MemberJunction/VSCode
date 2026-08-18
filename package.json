@@ -4,7 +4,7 @@
   "description": "Development toolkit for MemberJunction: metadata management, entity IntelliSense, and code navigation",
   "version": "0.1.0",
   "publisher": "memberjunction",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.85.0"
